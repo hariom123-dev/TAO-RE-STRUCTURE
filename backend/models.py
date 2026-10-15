@@ -301,6 +301,8 @@ class PipelineMetrics(BaseModel):
     total_cost_usd: float = 0.0
     tier_executed: TierLevel = TierLevel.TIER_0
     tokens_saved_by_cache: int = 0
+    usd_saved_by_cache: float = 0.0
+    usd_saved_by_routing: float = 0.0
 
 
 class TAORequest(BaseModel):
@@ -308,6 +310,7 @@ class TAORequest(BaseModel):
     context: str = ""
     force_tier: Optional[TierLevel] = None
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    client_api_keys: Optional[dict[str, str]] = None
 
 
 class TAOResponse(BaseModel):

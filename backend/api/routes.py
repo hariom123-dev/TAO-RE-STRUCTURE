@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Header, WebSocket, WebSocketDisconnect
 from backend.models import (
     ConstitutionalPrinciple,
     DebateVerdict,
@@ -30,13 +30,29 @@ _constitution_store = ConstitutionStore()
 
 
 @router.post("/api/analyze", response_model=TAOResponse)
-async def analyze_query(request: TAORequest) -> TAOResponse:
+async def analyze_query(
+    request: TAORequest,
+    x_openai_key: Optional[str] = Header(None, alias="X-OpenAI-Key"),
+    x_anthropic_key: Optional[str] = Header(None, alias="X-Anthropic-Key"),
+    x_ollama_base_url: Optional[str] = Header(None, alias="X-Ollama-Base-URL"),
+) -> TAOResponse:
     """
     Submit a query through the TAO pipeline.
 
     The query is routed through the complexity router and
     processed by the appropriate tiers.
     """
+    if request.client_api_keys is None:
+        request.client_api_keys = {}
+    if x_openai_key and "openai" not in request.client_api_keys:
+        request.client_api_keys["openai"] = x_openai_key
+    if x_anthropic_key and "anthropic" not in request.client_api_keys:
+        request.client_api_keys["anthropic"] = x_anthropic_key
+    if x_ollama_base_url and "ollama" not in request.client_api_keys:
+        request.client_api_keys["ollama"] = x_ollama_base_url
+    if not request.client_api_keys:
+        request.client_api_keys = None
+
     pipeline = TAOPipeline()
     result = await pipeline.analyze(request)
     return result

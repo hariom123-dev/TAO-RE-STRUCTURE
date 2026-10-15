@@ -36,6 +36,7 @@ from backend.models import (
 )
 from backend.router.complexity_router import classify_query
 from backend.state.checkpointer import pipeline_checkpointer
+from backend.state.hitl_webhook import hitl_manager
 from backend.tier1.compiler import compiler_worker
 from backend.tier1.constitution import ConstitutionStore
 from backend.tier1.generator import backtrack_and_refine, generate_response
@@ -202,6 +203,8 @@ class TAOPipeline:
                     total_rounds=0,
                     case_law_match=precedent,
                 )
+                metrics.tokens_saved_by_cache = precedent.tokens_saved
+                metrics.usd_saved_by_cache = round(precedent.tokens_saved * 0.00001, 4)
 
                 await self._emit(
                     "case_law_hit",
@@ -263,6 +266,18 @@ class TAOPipeline:
                     )
                     if compiler_worker.should_compile():
                         compiler_worker.compile_signatures()
+
+                # Trigger HITL escalation if debate was inconclusive / low confidence
+                if tier2_result.judge_confidence < settings.tier2_judge_confidence_threshold and tier2_result.total_rounds >= settings.tier2_max_debate_rounds:
+                    hitl_payload = hitl_manager.create_payload(
+                        request_id=req_id,
+                        trigger_reason=f"Debate Inconclusive (Confidence: {tier2_result.judge_confidence:.2f} < {settings.tier2_judge_confidence_threshold:.2f} after {tier2_result.total_rounds} rounds)",
+                        severity="WARNING",
+                        domain=routing.domain,
+                        checkpoint_id="tier2",
+                        snippet=final_response,
+                    )
+                    asyncio.create_task(hitl_manager.dispatch_escalation(hitl_payload))
 
                 # Checkpoint: Tier 2 Debate Node
                 pipeline_checkpointer.save_checkpoint(
@@ -337,6 +352,17 @@ class TAOPipeline:
                     },
                 )
 
+                if tier3_result.stego_analysis.alert_triggered or tier3_result.cusum_alert_triggered:
+                    hitl_payload = hitl_manager.create_payload(
+                        request_id=req_id,
+                        trigger_reason=f"Steganography Sentinel Alert (KL: {tier3_result.stego_analysis.kl_divergence:.3f}, CUSUM: {tier3_result.cusum_drift_score:.3f})",
+                        severity="CRITICAL",
+                        domain=routing.domain,
+                        checkpoint_id="tier3",
+                        snippet=final_response,
+                    )
+                    asyncio.create_task(hitl_manager.dispatch_escalation(hitl_payload))
+
         # ── Step 3: Guardrails AI Output Validation ───────────
         guardrails_result: Optional[GuardrailsResult] = None
         if settings.guardrails_enabled:
@@ -365,9 +391,10 @@ class TAOPipeline:
                 },
             )
 
-        # ── Step 4: Finalize Metrics & Response ───────────────
         metrics.total_latency_ms = round((time.time() - start_time) * 1000, 2)
         metrics.total_cost_usd = round(metrics.total_tokens * 0.00001, 4)
+        if routing.tier < 2:
+            metrics.usd_saved_by_routing = round(3800 * 0.00001, 4)
 
         response = TAOResponse(
             request_id=req_id,

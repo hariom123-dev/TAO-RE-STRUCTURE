@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from backend.api.routes import router
+from backend.api.openai_proxy import proxy_router
 from backend.ollama_judge.routes import judge_router
 from backend.config import settings
 
@@ -31,6 +32,7 @@ app.add_middleware(
 
 # ─── API Routes ────────────────────────────────────────────────
 app.include_router(router)
+app.include_router(proxy_router)
 app.include_router(judge_router)
 
 # ─── Static Files (Frontend) ──────────────────────────────────

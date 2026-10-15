@@ -117,6 +117,7 @@ class ReceiptGenerator:
             }, sort_keys=True)
         leaf_4 = _sha256(f"leaf_4_guardrails:{guard_summary}")
         node_hashes["leaf_4_guardrails"] = leaf_4
+        node_hashes["response_hash"] = _sha256(response.final_response)
 
         # Build Merkle Tree Layers
         # Layer 1: combine (0,1), (2,3), (4,4)

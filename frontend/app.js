@@ -243,9 +243,17 @@ async function analyzeViaWebSocket(body) {
 async function analyzeViaREST(body) {
   setNodeState(nodeRouter, 'active');
 
+  const headers = { 'Content-Type': 'application/json' };
+  const oaiKey = localStorage.getItem('tao_openai_key');
+  const antKey = localStorage.getItem('tao_anthropic_key');
+  const ollamaUrl = localStorage.getItem('tao_ollama_url');
+  if (oaiKey) headers['X-OpenAI-Key'] = oaiKey;
+  if (antKey) headers['X-Anthropic-Key'] = antKey;
+  if (ollamaUrl) headers['X-Ollama-Base-URL'] = ollamaUrl;
+
   const res = await fetch(`${API_BASE}/api/analyze`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headers,
     body: JSON.stringify(body),
   });
 
@@ -859,6 +867,16 @@ function renderMetrics(metrics, routing) {
     `;
   }
 
+  const totalUsdSaved = ((metrics.usd_saved_by_cache || 0) + (metrics.usd_saved_by_routing || 0));
+  if (totalUsdSaved > 0) {
+    html += `
+      <div class="animate-slide" style="margin-top: 10px; padding: 10px 14px; background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.25); border-radius: 6px; font-size: 12px; color: var(--accent); display: flex; align-items: center; gap: 8px;">
+        <span>💰</span>
+        <span><strong>Real-Time USD Cost Savings:</strong> Saved <strong>+$${totalUsdSaved.toFixed(4)} USD</strong> by bypassing redundant debate.</span>
+      </div>
+    `;
+  }
+
   const maxLatency = Math.max(
     metrics.routing_latency_ms || 0,
     metrics.tier1_latency_ms || 0,
@@ -1237,6 +1255,42 @@ function setupModalListeners() {
   const btnExecuteFork = document.getElementById('btn-execute-fork');
   if (btnExecuteFork) {
     btnExecuteFork.addEventListener('click', executeFork);
+  }
+
+  // Settings / BYOK modal
+  const modalSettings = document.getElementById('modal-settings-overlay');
+  const openSettingsBtn = document.getElementById('btn-open-settings');
+  const closeSettingsBtn = document.getElementById('close-modal-settings-btn');
+  const saveSettingsBtn = document.getElementById('btn-save-byok-settings');
+  const inputOai = document.getElementById('byok-openai-key');
+  const inputAnt = document.getElementById('byok-anthropic-key');
+  const inputOllama = document.getElementById('byok-ollama-url');
+
+  if (openSettingsBtn && modalSettings) {
+    openSettingsBtn.addEventListener('click', () => {
+      if (inputOai) inputOai.value = localStorage.getItem('tao_openai_key') || '';
+      if (inputAnt) inputAnt.value = localStorage.getItem('tao_anthropic_key') || '';
+      if (inputOllama) inputOllama.value = localStorage.getItem('tao_ollama_url') || 'http://localhost:11434';
+      modalSettings.style.display = 'flex';
+      modalSettings.classList.add('open');
+    });
+  }
+
+  if (closeSettingsBtn && modalSettings) {
+    closeSettingsBtn.addEventListener('click', () => {
+      modalSettings.classList.remove('open');
+      modalSettings.style.display = 'none';
+    });
+  }
+
+  if (saveSettingsBtn && modalSettings) {
+    saveSettingsBtn.addEventListener('click', () => {
+      if (inputOai) localStorage.setItem('tao_openai_key', inputOai.value.trim());
+      if (inputAnt) localStorage.setItem('tao_anthropic_key', inputAnt.value.trim());
+      if (inputOllama) localStorage.setItem('tao_ollama_url', inputOllama.value.trim());
+      modalSettings.classList.remove('open');
+      modalSettings.style.display = 'none';
+    });
   }
 }
 

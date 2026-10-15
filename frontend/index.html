@@ -55,6 +55,10 @@
           <span class="status-dot"></span>
           <span id="ollama-status-text">Checking Ollama...</span>
         </div>
+        <button class="nav-tab" id="btn-open-settings" style="width: 100%; margin-top: 10px; justify-content: flex-start; padding: 7px 10px; font-size: 11px; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); border-radius: var(--radius-xs);">
+          <span class="nav-tab-icon">⚙️</span>
+          BYOK Settings
+        </button>
       </div>
     </aside>
 
@@ -511,6 +515,42 @@
         <textarea id="fork-query-input" class="query-textarea" rows="3" style="margin-bottom: 14px;"></textarea>
         <button id="btn-execute-fork" class="btn btn-primary" style="width: 100%;">
           ⚡ Replay Forward from Checkpoint
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: BYOK Provider Settings -->
+  <div id="modal-settings-overlay" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); width: 90%; max-width: 520px; padding: 24px; box-shadow: var(--shadow-lg);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; font-weight: 700; color: var(--accent); margin: 0; display: flex; align-items: center; gap: 8px;">
+          ⚙️ Bring Your Own Key (BYOK) Provider Settings
+        </h3>
+        <button id="close-modal-settings-btn" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px;">✕</button>
+      </div>
+      <div>
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+          Keys are stored securely in your browser's <code style="color: var(--accent);">localStorage</code> and transmitted directly to the gateway via request headers.
+        </p>
+
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">OpenAI API Key (for GPT-4o Skeptic / Judge):</label>
+          <input type="password" id="byok-openai-key" class="query-textarea" style="height: 36px; padding: 8px 12px; width: 100%;" placeholder="sk-..." autocomplete="off">
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Anthropic API Key (for Claude 3.5 Sonnet Prover):</label>
+          <input type="password" id="byok-anthropic-key" class="query-textarea" style="height: 36px; padding: 8px 12px; width: 100%;" placeholder="sk-ant-..." autocomplete="off">
+        </div>
+
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Local Ollama Base URL:</label>
+          <input type="text" id="byok-ollama-url" class="query-textarea" style="height: 36px; padding: 8px 12px; width: 100%;" placeholder="http://localhost:11434" value="http://localhost:11434">
+        </div>
+
+        <button id="btn-save-byok-settings" class="btn btn-primary" style="width: 100%;">
+          💾 Save Keys to LocalStorage
         </button>
       </div>
     </div>
