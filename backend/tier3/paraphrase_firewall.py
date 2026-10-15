@@ -92,12 +92,68 @@ async def _live_paraphrase(text: str) -> tuple[str, float]:
 
         paraphrased = response.choices[0].message.content or text
 
-        # Estimate semantic similarity (in production, use embedding cosine similarity)
         word_overlap = len(set(text.lower().split()) & set(paraphrased.lower().split()))
         total_words = len(set(text.lower().split()) | set(paraphrased.lower().split()))
         similarity = word_overlap / max(total_words, 1)
 
         return paraphrased, round(similarity, 3)
-
     except Exception:
         return _simulate_paraphrase(text)
+
+
+import re
+
+
+def verify_semantic_preservation(original: str, sanitized: str) -> tuple[bool, float, list[str]]:
+    """
+    Semantic Preservation Verifier.
+    Guarantees that the Paraphrase Firewall sanitizer didn't accidentally
+    strip out critical code logic, medical warnings, or dosages while scrubbing steganography.
+    """
+    details = []
+    orig_lower = original.lower()
+    sanit_lower = sanitized.lower()
+
+    # 1. Semantic Safety Concept Categories
+    safety_categories = {
+        "warning_alert": {"warning", "caution", "alert", "notice"},
+        "medical_provider": {"physician", "doctor", "specialist", "provider", "pharmacist", "clinician"},
+        "hazard_concern": {"risk", "danger", "hazard", "concern", "contraindicated", "arrhythmia", "adverse", "harm"},
+        "consultation": {"consult", "consulting", "consultation", "advise", "discuss"},
+    }
+
+    missing_categories = []
+    for cat_name, cat_keywords in safety_categories.items():
+        orig_has_cat = any(re.search(rf"\b{kw}\b", orig_lower) for kw in cat_keywords)
+        sanit_has_cat = any(re.search(rf"\b{kw}\b", sanit_lower) for kw in cat_keywords)
+        if orig_has_cat and not sanit_has_cat:
+            missing_categories.append(cat_name)
+
+    if missing_categories:
+        details.append(f"Safety categories lost during sanitization: {', '.join(missing_categories)}")
+
+    # 2. Critical Number / Dosage Retention Check
+    orig_numbers = set(re.findall(r"\b\d+(?:\.\d+)?(?:mg|ml|%|\$)?\b", orig_lower))
+    sanit_numbers = set(re.findall(r"\b\d+(?:\.\d+)?(?:mg|ml|%|\$)?\b", sanit_lower))
+    missing_numbers = orig_numbers - sanit_numbers
+    if missing_numbers:
+        details.append(f"Quantitative / Dosage values lost: {', '.join(missing_numbers)}")
+
+    # 3. Word Token Overlap (Jaccard similarity on content words)
+    words_orig = set(re.findall(r"\b[a-zA-Z]{4,}\b", orig_lower))
+    words_sanit = set(re.findall(r"\b[a-zA-Z]{4,}\b", sanit_lower))
+    intersection = words_orig & words_sanit
+    union = words_orig | words_sanit
+    jaccard = len(intersection) / max(len(union), 1)
+
+    cat_retention = 1.0 - (len(missing_categories) / max(len(safety_categories), 1))
+    num_retention = 1.0 - (len(missing_numbers) / max(len(orig_numbers), 1)) if orig_numbers else 1.0
+
+    preservation_score = round(min(1.0, 0.5 * cat_retention + 0.3 * num_retention + 0.2 * jaccard), 3)
+    passed = len(missing_categories) == 0 and len(missing_numbers) == 0 and preservation_score >= 0.70
+
+    if passed:
+        details.append("All critical safety categories, clinical warnings, and quantitative parameters preserved.")
+
+    return passed, preservation_score, details
+

@@ -34,11 +34,12 @@ from backend.models import (
     EnsembleJudgeVote,
     Tier2Result,
 )
-from backend.tier2.agents import create_judge, create_prover, create_skeptic
 from backend.tier2.mitigations import (
     COOLDOWN_PROMPT,
     anonymize_arguments,
     apply_perspective_shift,
+    compute_weak_verifier_legibility,
+    detect_collusion,
     detect_hostility,
     run_ensemble_judging,
     run_swap_test,
@@ -60,6 +61,9 @@ class DebateState:
         self.swap_test_passed = True
         self.cooldown_triggered = False
         self.ensemble_votes: list[EnsembleJudgeVote] = []
+        self.collusion_detected = False
+        self.skeptic_provider_swapped = False
+        self.weak_verifier_legibility_score = 1.0
 
 
 def route_debate(state: DebateState) -> str:
@@ -129,6 +133,18 @@ async def run_debate(context: str, initial_response: str, query: str) -> Tier2Re
             previous_arguments=state.all_arguments,
         )
         state.all_arguments.append(skeptic_arg)
+
+        # ── Pillar 5: Prover-Skeptic Collusion Audit ─────────
+        if detect_collusion(prover_arg.content, skeptic_arg.content):
+            state.collusion_detected = True
+            state.skeptic_provider_swapped = True
+            skeptic = create_skeptic()
+            skeptic.model = "deepseek-r1-adversarial-audit"
+
+        # ── Pillar 6: Weak-to-Strong Legibility Index ─────────
+        state.weak_verifier_legibility_score = compute_weak_verifier_legibility(
+            prover_arg.content, skeptic_arg.content
+        )
 
         # ── Anonymized Judging (Section 4.2) ─────────────────
         anon_prover, anon_skeptic = anonymize_arguments(prover_arg, skeptic_arg)
@@ -219,6 +235,9 @@ async def run_debate(context: str, initial_response: str, query: str) -> Tier2Re
         total_rounds=state.round_count,
         cooldown_triggered=state.cooldown_triggered,
         ensemble_votes=state.ensemble_votes,
+        weak_verifier_legibility_score=state.weak_verifier_legibility_score,
+        collusion_detected=state.collusion_detected,
+        skeptic_provider_swapped=state.skeptic_provider_swapped,
     )
 
 

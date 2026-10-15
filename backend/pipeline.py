@@ -13,10 +13,12 @@ Flow:
 
 import asyncio
 import time
+import uuid
 from typing import AsyncGenerator, Callable, Optional
 
 from backend.caselaw.case_law_store import case_law_store
 from backend.config import settings
+from backend.guardrails.receipt_generator import receipt_generator
 from backend.guardrails.validator import guardrails_validator
 from backend.models import (
     CaseLawPrecedent,
@@ -24,6 +26,7 @@ from backend.models import (
     GuardrailsResult,
     PipelineEvent,
     PipelineMetrics,
+    TAOReceipt,
     TAORequest,
     TAOResponse,
     Tier1Result,
@@ -32,11 +35,13 @@ from backend.models import (
     TierLevel,
 )
 from backend.router.complexity_router import classify_query
+from backend.state.checkpointer import pipeline_checkpointer
+from backend.tier1.compiler import compiler_worker
 from backend.tier1.constitution import ConstitutionStore
 from backend.tier1.generator import backtrack_and_refine, generate_response
 from backend.tier1.process_supervisor import ProcessSupervisor
 from backend.tier2.debate_graph import run_debate
-from backend.tier3.paraphrase_firewall import paraphrase
+from backend.tier3.paraphrase_firewall import paraphrase, verify_semantic_preservation
 from backend.tier3.stego_detector import StegoDetector
 
 
@@ -82,6 +87,7 @@ class TAOPipeline:
         """Run the full TAO pipeline on a query."""
         start_time = time.time()
         metrics = PipelineMetrics()
+        req_id = request.session_id or str(uuid.uuid4())
 
         # ── Step 1: Route & Complexity Triage ─────────────────
         await self._emit("routing", data={"query": request.query})
@@ -103,6 +109,14 @@ class TAOPipeline:
             reasoning_effort = "medium"
         else:
             reasoning_effort = "low"
+
+        # Checkpoint: Router Node
+        pipeline_checkpointer.save_checkpoint(
+            request_id=req_id,
+            node_name="router",
+            state_data={"query": request.query, "tier": routing.tier.value, "domain": routing.domain},
+            summary=f"Query classified to Tier {routing.tier.value} ({routing.domain})",
+        )
 
         await self._emit(
             "routing_complete",
@@ -136,6 +150,19 @@ class TAOPipeline:
             metrics.tier1_latency_ms = round((time.time() - t1_start) * 1000, 2)
             metrics.total_tokens += (
                 tier1_result.generation.reasoning_tokens + tier1_result.generation.completion_tokens
+            )
+
+            # Checkpoint: Tier 1 Process Supervision Node
+            pipeline_checkpointer.save_checkpoint(
+                request_id=req_id,
+                node_name="tier1",
+                state_data={
+                    "query": request.query,
+                    "passed": tier1_result.passed,
+                    "iterations": tier1_result.iterations,
+                    "final_response": final_response,
+                },
+                summary=f"Tier 1 Process Supervision ({'Passed' if tier1_result.passed else 'Backtracked'})",
             )
 
             await self._emit(
@@ -224,6 +251,33 @@ class TAOPipeline:
                         confidence=tier2_result.judge_confidence,
                     )
 
+                # Pillar 1: Record Hard-Negative & Auto-Compile if High-Confidence Skeptic Win
+                if settings.case_law_enabled and tier2_result.verdict == DebateVerdict.SKEPTIC_WINS and tier2_result.judge_confidence >= 0.90:
+                    case_law_store.add_hard_negative(
+                        query=request.query,
+                        flawed_cot=tier1_result.generation.raw_cot if tier1_result else final_response,
+                        skeptic_critique=tier2_result.rounds[-1].skeptic_critique.content if tier2_result.rounds else "",
+                        judge_verdict=tier2_result.verdict,
+                        confidence=tier2_result.judge_confidence,
+                        domain=routing.domain,
+                    )
+                    if compiler_worker.should_compile():
+                        compiler_worker.compile_signatures()
+
+                # Checkpoint: Tier 2 Debate Node
+                pipeline_checkpointer.save_checkpoint(
+                    request_id=req_id,
+                    node_name="tier2",
+                    state_data={
+                        "query": request.query,
+                        "verdict": tier2_result.verdict.value,
+                        "confidence": tier2_result.judge_confidence,
+                        "rounds": tier2_result.total_rounds,
+                        "final_response": final_response,
+                    },
+                    summary=f"Tier 2 Debate ({tier2_result.verdict.value}, conf: {tier2_result.judge_confidence:.2f})",
+                )
+
                 await self._emit(
                     "tier2_complete",
                     tier=2,
@@ -234,6 +288,7 @@ class TAOPipeline:
                         "swap_test_passed": tier2_result.swap_test_passed,
                         "cooldown_triggered": tier2_result.cooldown_triggered,
                         "ensemble_votes_count": len(tier2_result.ensemble_votes),
+                        "weak_verifier_legibility": tier2_result.weak_verifier_legibility_score,
                     },
                 )
 
@@ -247,12 +302,27 @@ class TAOPipeline:
                 await self._emit("tier3_start", tier=3)
                 t3_start = time.time()
 
-                tier3_result = await self._run_tier3(final_response, routing.domain)
+                tier3_result = await self._run_tier3(final_response, routing.domain, req_id)
 
                 if tier3_result.paraphrased:
                     final_response = tier3_result.sanitized_text
 
                 metrics.tier3_latency_ms = round((time.time() - t3_start) * 1000, 2)
+
+                # Checkpoint: Tier 3 Stego Node
+                pipeline_checkpointer.save_checkpoint(
+                    request_id=req_id,
+                    node_name="tier3",
+                    state_data={
+                        "query": request.query,
+                        "kl_divergence": tier3_result.stego_analysis.kl_divergence,
+                        "alert_triggered": tier3_result.stego_analysis.alert_triggered,
+                        "paraphrased": tier3_result.paraphrased,
+                        "cusum_drift": tier3_result.cusum_drift_score,
+                        "final_response": final_response,
+                    },
+                    summary=f"Tier 3 Stego Sentinel (KL: {tier3_result.stego_analysis.kl_divergence}, Paraphrased: {tier3_result.paraphrased})",
+                )
 
                 await self._emit(
                     "tier3_complete",
@@ -262,6 +332,8 @@ class TAOPipeline:
                         "alert_triggered": tier3_result.stego_analysis.alert_triggered,
                         "paraphrased": tier3_result.paraphrased,
                         "perplexity": tier3_result.stego_analysis.perplexity,
+                        "cusum_drift": tier3_result.cusum_drift_score,
+                        "semantic_preservation": tier3_result.semantic_preservation_score,
                     },
                 )
 
@@ -271,6 +343,19 @@ class TAOPipeline:
             g_start = time.time()
             final_response, guardrails_result = guardrails_validator.validate_and_sanitize(final_response)
             metrics.guardrails_latency_ms = round((time.time() - g_start) * 1000, 2)
+
+            # Checkpoint: Guardrails Node
+            pipeline_checkpointer.save_checkpoint(
+                request_id=req_id,
+                node_name="guardrails",
+                state_data={
+                    "query": request.query,
+                    "passed": guardrails_result.passed,
+                    "final_response": final_response,
+                },
+                summary=f"Output Guardrails ({'Passed' if guardrails_result.passed else 'Flagged'})",
+            )
+
             await self._emit(
                 "guardrails_complete",
                 data={
@@ -285,6 +370,7 @@ class TAOPipeline:
         metrics.total_cost_usd = round(metrics.total_tokens * 0.00001, 4)
 
         response = TAOResponse(
+            request_id=req_id,
             query=request.query,
             routing=routing,
             tier1_result=tier1_result,
@@ -296,6 +382,10 @@ class TAOPipeline:
             reasoning_effort=reasoning_effort,
             metrics=metrics,
         )
+
+        # Pillar 7: Zero-Trust Cryptographic Oversight Receipt Attestation
+        receipt = receipt_generator.generate_receipt(response)
+        response.receipt = receipt
 
         await self._emit(
             "pipeline_complete",
@@ -383,20 +473,27 @@ class TAOPipeline:
         )
         return result
 
-    async def _run_tier3(self, text: str, domain: str) -> Tier3Result:
-        """Execute Tier 3: Steganography Detection & Paraphrase Defense."""
+    async def _run_tier3(self, text: str, domain: str, session_id: str = "default") -> Tier3Result:
+        """Execute Tier 3: Steganography Detection, CUSUM Drift & Paraphrase Defense."""
         detector = StegoDetector(domain=domain)
         stego_analysis = await detector.analyze(text)
+
+        # Cross-Turn CUSUM drift detection
+        cusum_drift, cusum_alert = detector.analyze_session_cusum_drift(session_id, stego_analysis.kl_divergence)
+        if cusum_alert:
+            stego_analysis.alert_triggered = True
 
         paraphrased = False
         sanitized_text = text
         similarity = 1.0
+        preservation_score = 1.0
 
         # Paraphrase Defense: triggered on alert OR high-security domains (code/financial)
         is_high_sec = domain in ("code_deployment", "financial", "security")
         if stego_analysis.alert_triggered or is_high_sec:
             sanitized_text, similarity = await paraphrase(text)
             paraphrased = True
+            _, preservation_score, _ = verify_semantic_preservation(text, sanitized_text)
 
         return Tier3Result(
             stego_analysis=stego_analysis,
@@ -404,4 +501,36 @@ class TAOPipeline:
             original_text=text if paraphrased else "",
             sanitized_text=sanitized_text,
             semantic_similarity=similarity,
+            cusum_drift_score=cusum_drift,
+            cusum_alert_triggered=cusum_alert,
+            semantic_preservation_score=preservation_score,
         )
+
+    async def fork_and_replay(
+        self,
+        original_request_id: str,
+        checkpoint_id: str,
+        overrides: dict,
+    ) -> TAOResponse:
+        """
+        Pillar 4: LangGraph Time-Travel & Counterfactual Forking.
+        Replays pipeline forward from a specified historical checkpoint with parameter overrides.
+        """
+        chk = pipeline_checkpointer.get_checkpoint(checkpoint_id)
+        if not chk:
+            raise ValueError(f"Checkpoint '{checkpoint_id}' not found.")
+
+        query = overrides.get("query", chk.state_data.get("query", ""))
+        force_tier = overrides.get("force_tier")
+
+        fork_req = TAORequest(
+            query=query,
+            context=overrides.get("context", ""),
+            force_tier=force_tier,
+            session_id=str(uuid.uuid4()),
+        )
+
+        response = await self.analyze(fork_req)
+        response.parent_request_id = original_request_id
+        response.checkpoint_id = checkpoint_id
+        return response

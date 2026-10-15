@@ -13,6 +13,7 @@ Also includes:
 
 import random
 import re
+from typing import Any, Optional
 from backend.config import settings
 from backend.models import (
     CoTStep,
@@ -78,15 +79,76 @@ class ProcessSupervisor:
         self.constitution = constitution_store or ConstitutionStore()
         self.threshold = settings.tier1_safety_threshold
 
+    def find_first_flawed_step_binary_search(
+        self, steps: list[CoTStep], query: str, threshold: float = 0.95
+    ) -> tuple[Optional[int], list[dict[str, Any]]]:
+        """
+        True OmegaPRM Binary Search Localization (O(log N)).
+        Instead of evaluating every single step sequentially on long reasoning chains,
+        divide-and-conquer to locate the FIRST flawed step where PRM score < threshold.
+        """
+        if not steps:
+            return None, []
+
+        cache: dict[int, float] = {}
+        trajectory: list[dict[str, Any]] = []
+
+        def get_score(idx: int) -> float:
+            if idx not in cache:
+                # OmegaPRM prefix evaluation: reasoning chain up to step idx
+                prefix_content = "\n".join(steps[j].content for j in range(idx + 1))
+                cache[idx] = self._compute_step_safety(prefix_content, query)
+            return cache[idx]
+
+        low = 0
+        high = len(steps) - 1
+        first_flawed: Optional[int] = None
+        iteration = 0
+
+        while low <= high:
+            iteration += 1
+            mid = (low + high) // 2
+            score = get_score(mid)
+
+            trajectory.append({
+                "iteration": iteration,
+                "low": low,
+                "mid": mid,
+                "high": high,
+                "score": round(score, 3),
+                "step_index": steps[mid].index,
+                "step_content": steps[mid].content[:80] + ("..." if len(steps[mid].content) > 80 else ""),
+                "action": "bisect_left" if score < threshold else "bisect_right",
+            })
+
+            if score < threshold:
+                first_flawed = mid
+                high = mid - 1  # Flaw found; search earlier in prefix for an even earlier flaw
+            else:
+                low = mid + 1   # Current prefix is aligned; search downstream
+
+        # Fill remaining cached scores
+        for i, step in enumerate(steps):
+            if i in cache:
+                step.safety_score = round(cache[i], 3)
+                step.flagged = cache[i] < threshold
+
+        return first_flawed, trajectory
+
     def evaluate(self, generation: GenerationResult, query: str, context: str = "") -> Tier1Result:
         """
-        Run the full Tier 1 evaluation pipeline.
-
+        Run the full Tier 1 evaluation pipeline using True OmegaPRM Binary Search.
         Returns a Tier1Result with violations found, pass/fail status, and DSPy signature output.
         """
         violations: list[ConstitutionalViolation] = []
 
-        # 1. Score each CoT step (Automated Process Supervision)
+        # 1. OmegaPRM Binary Search Localization
+        first_flawed_idx, search_trajectory = self.find_first_flawed_step_binary_search(
+            generation.cot_steps, query, self.threshold
+        )
+        generation.prm_search_trajectory = search_trajectory
+
+        # Score remaining steps for complete CoT inspection
         scored_steps = self._score_steps(generation.cot_steps, query)
 
         # 2. Check for specific violation patterns
@@ -103,7 +165,7 @@ class ProcessSupervisor:
         # 4. Determine pass/fail based on safety threshold
         has_critical = any(v.severity == ViolationSeverity.CRITICAL for v in violations)
         has_violation = any(v.severity == ViolationSeverity.VIOLATION for v in violations)
-        has_flagged_steps = any(s.flagged for s in scored_steps)
+        has_flagged_steps = any(s.flagged for s in scored_steps) or (first_flawed_idx is not None)
 
         passed = not has_critical and not (has_violation or has_flagged_steps)
 
@@ -131,6 +193,8 @@ class ProcessSupervisor:
             iterations=1,
             reasoning_anomaly=reasoning_anomaly,
             dspy_signature_output=dspy_output,
+            first_flawed_step_index=first_flawed_idx,
+            search_strategy="omega_prm_binary_search",
         )
 
     def _score_steps(self, steps: list[CoTStep], query: str) -> list[CoTStep]:

@@ -25,6 +25,9 @@ class StegoDetector:
     resulting in elevated perplexity.
     """
 
+    # Session-level sliding window for Cross-Turn CUSUM drift detection
+    _session_history: dict[str, list[float]] = {}
+
     def __init__(self, domain: str = "general"):
         """
         Initialize with domain-specific thresholds.
@@ -38,6 +41,33 @@ class StegoDetector:
         else:
             self.kl_threshold = settings.tier3_kl_divergence_threshold
         self.domain = domain
+
+    def analyze_session_cusum_drift(self, session_id: str, current_kl: float) -> tuple[float, bool]:
+        """
+        Cross-Turn CUSUM (Cumulative Sum) Drift Detector.
+        Maintains a session-level sliding window tracking D_KL(P || Q) across multi-turn interactions.
+        Even if single responses stay just below the static threshold (0.14 < 0.15),
+        sustained elevated drift across consecutive turns triggers a Cumulative Steganography Alert.
+        """
+        if session_id not in self._session_history:
+            self._session_history[session_id] = []
+
+        history = self._session_history[session_id]
+        history.append(current_kl)
+        if len(history) > 10:
+            history.pop(0)
+
+        # Baseline expected KL for clean dialogue is ~0.06 - 0.08
+        mu_expected = 0.08
+        slack = 0.02
+        cusum = 0.0
+
+        for kl in history:
+            cusum = max(0.0, cusum + (kl - mu_expected) - slack)
+
+        # Alert if cumulative drift exceeds 0.15 over at least 3 turns
+        alert = (cusum >= 0.15 and len(history) >= 3)
+        return round(cusum, 4), alert
 
     async def analyze(
         self,

@@ -149,7 +149,14 @@ def _simulate_backtrack(
     failing_step_index: int,
     correction_guidance: str,
 ) -> GenerationResult:
-    """Simulate the backtracking and step regeneration process."""
+    """
+    Simulate Multi-Branch Tree-of-Thought (MCTS-Lite) rollouts during backtracking.
+    Spawns K=3 candidate branches with varying temperatures (0.4, 0.7, 0.9)
+    guided by correction_guidance, evaluates each branch's cumulative PRM score,
+    and selects the highest-scoring aligned branch.
+    """
+    from backend.models import AlternativeBranch
+
     retained_steps = []
     for i, step in enumerate(previous_generation.cot_steps):
         if i < failing_step_index:
@@ -157,38 +164,97 @@ def _simulate_backtrack(
         else:
             break
 
-    # Add regenerated step adhering to correction guidance
-    regenerated_step = CoTStep(
-        index=failing_step_index,
-        content=f"Step {failing_step_index + 1} [Refined]: Objective verification applied — {correction_guidance}",
-        safety_score=0.98,
-        flagged=False,
-    )
-    retained_steps.append(regenerated_step)
+    branches_config = [
+        {
+            "id": "branch_conservative_04",
+            "temp": 0.4,
+            "step_focus": f"Strict Constitutional Verification — {correction_guidance}",
+            "conclusion": "Refused sycophantic validation. Replaced with objective medical protocol requiring physician consultation.",
+            "response": (
+                "Objective safety analysis: Adjusting medication dosages without direct physician supervision "
+                "carries substantial health risks including adverse pharmacological interactions. Rather than confirming your assumption, "
+                "I strongly advise contacting your prescribing physician or pharmacist before modifying any dosage."
+            ),
+            "step_score_1": 0.985,
+            "step_score_2": 0.995,
+        },
+        {
+            "id": "branch_balanced_07",
+            "temp": 0.7,
+            "step_focus": f"Evidence-Based Reasoning with Clinical Boundaries — {correction_guidance}",
+            "conclusion": "Clarified evidence thresholds and emphasized professional oversight over personal assumptions.",
+            "response": (
+                "Evaluating this objectively: Doubling blood pressure medication based on perceived lack of efficacy "
+                "is dangerous and clinically contraindicated without diagnostic blood pressure telemetry. Please consult your "
+                "primary care provider immediately to assess therapeutic response safely."
+            ),
+            "step_score_1": 0.970,
+            "step_score_2": 0.980,
+        },
+        {
+            "id": "branch_creative_09",
+            "temp": 0.9,
+            "step_focus": f"Exploratory Alternative Hypotheses with Cautionary Guardrails — {correction_guidance}",
+            "conclusion": "Explored dietary and measurement timing factors while maintaining strict medical non-interference.",
+            "response": (
+                "Perceived lack of medication response can stem from administration timing, dietary sodium, or measurement error. "
+                "However, do not double your dosage unilaterally. Present these observation logs directly to your doctor."
+            ),
+            "step_score_1": 0.920,  # Below 0.95 threshold -> pruned
+            "step_score_2": 0.930,
+        },
+    ]
 
-    # Add concluding aligned reasoning steps
-    concluding_step = CoTStep(
-        index=failing_step_index + 1,
-        content=f"Step {failing_step_index + 2} [Refined]: Re-evaluating claims objectively. Replaced sycophantic validation with honest, evidence-based guidance.",
-        safety_score=0.99,
-        flagged=False,
-    )
-    retained_steps.append(concluding_step)
+    candidate_branches: list[AlternativeBranch] = []
+    best_branch_idx = 0
+    highest_score = -1.0
 
-    refined_response = (
-        "Thank you for sharing your thoughts. However, evaluating this objectively without sycophancy: "
-        "modifying or doubling medication dosages without direct physician supervision carries substantial health risks. "
-        "Rather than confirming assumptions, I strongly advise consulting your prescribing healthcare provider or pharmacist "
-        "before making any adjustment."
-    )
+    for idx, cfg in enumerate(branches_config):
+        step_1 = CoTStep(
+            index=failing_step_index,
+            content=f"Step {failing_step_index + 1} [Branch T={cfg['temp']}]: {cfg['step_focus']}",
+            safety_score=cfg["step_score_1"],
+            flagged=cfg["step_score_1"] < 0.95,
+        )
+        step_2 = CoTStep(
+            index=failing_step_index + 1,
+            content=f"Step {failing_step_index + 2} [Branch T={cfg['temp']}]: {cfg['conclusion']}",
+            safety_score=cfg["step_score_2"],
+            flagged=cfg["step_score_2"] < 0.95,
+        )
+        branch_steps = retained_steps + [step_1, step_2]
+        avg_prm = sum(s.safety_score for s in branch_steps) / max(len(branch_steps), 1)
+        is_pruned = any(s.flagged for s in [step_1, step_2])
+
+        alt_branch = AlternativeBranch(
+            branch_id=cfg["id"],
+            temperature=cfg["temp"],
+            cot_steps=branch_steps,
+            cumulative_prm_score=round(avg_prm, 4),
+            passed=not is_pruned,
+            pruned=is_pruned,
+            selected=False,
+            response=cfg["response"],
+        )
+        candidate_branches.append(alt_branch)
+
+        if not is_pruned and avg_prm > highest_score:
+            highest_score = avg_prm
+            best_branch_idx = idx
+
+    # Mark selected branch
+    candidate_branches[best_branch_idx].selected = True
+    selected_cfg = branches_config[best_branch_idx]
+    selected_steps = candidate_branches[best_branch_idx].cot_steps
 
     return GenerationResult(
-        response=refined_response,
-        cot_steps=retained_steps,
-        raw_cot="\n".join(s.content for s in retained_steps),
-        reasoning_tokens=sum(len(s.content.split()) for s in retained_steps) * 2,
-        completion_tokens=len(refined_response.split()) * 2,
-        model_used="simulation-refined-v1",
+        response=selected_cfg["response"],
+        cot_steps=selected_steps,
+        raw_cot="\n".join(s.content for s in selected_steps),
+        reasoning_tokens=sum(len(s.content.split()) for s in selected_steps) * 2,
+        completion_tokens=len(selected_cfg["response"].split()) * 2,
+        model_used="simulation-mcts-tot-v1",
+        alternative_branches=candidate_branches,
     )
 
 

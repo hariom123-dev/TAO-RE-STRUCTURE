@@ -1,21 +1,26 @@
-"""
-API Routes — REST and WebSocket endpoints for the TAO dashboard.
-"""
-
 import asyncio
 import json
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from backend.models import (
+    ConstitutionalPrinciple,
+    DebateVerdict,
+    ForkRequest,
+    PipelineEvent,
+    ReceiptVerificationResult,
+    ReceiptVerifyRequest,
+    RedTeamRequest,
     TAORequest,
     TAOResponse,
-    PipelineEvent,
     TierLevel,
-    ConstitutionalPrinciple,
 )
 from backend.pipeline import TAOPipeline, get_history
 from backend.tier1.constitution import ConstitutionStore, DEFAULT_CONSTITUTION
+from backend.tier1.compiler import compiler_worker
+from backend.guardrails.receipt_generator import receipt_generator
+from backend.state.checkpointer import pipeline_checkpointer
+from backend.redteam.houdini_agent import houdini_agent
 from backend.config import settings
 
 router = APIRouter()
@@ -99,6 +104,88 @@ async def get_config():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "version": "1.0.0", "architecture": "TAO"}
+
+
+# ─── Pillar 4: LangGraph Time-Travel & Counterfactual Forking ──
+
+@router.post("/api/pipeline/fork", response_model=TAOResponse)
+async def fork_pipeline(request: ForkRequest) -> TAOResponse:
+    """Replay pipeline execution forward from a historical state checkpoint with overrides."""
+    pipeline = TAOPipeline()
+    return await pipeline.fork_and_replay(
+        original_request_id=request.original_request_id,
+        checkpoint_id=request.checkpoint_id,
+        overrides=request.overrides,
+    )
+
+
+@router.get("/api/pipeline/checkpoints/{request_id}")
+async def get_checkpoints(request_id: str):
+    """Retrieve historical state checkpoints recorded for a specific request ID."""
+    checkpoints = pipeline_checkpointer.get_checkpoints_for_request(request_id)
+    return {
+        "request_id": request_id,
+        "checkpoints": [c.model_dump() for c in checkpoints],
+        "total": len(checkpoints),
+    }
+
+
+# ─── Pillar 7: Zero-Trust Cryptographic Oversight Receipts ─────
+
+@router.post("/api/verify-receipt", response_model=ReceiptVerificationResult)
+async def verify_receipt(request: ReceiptVerifyRequest) -> ReceiptVerificationResult:
+    """Verify cryptographic authenticity and Merkle tree root of an execution receipt."""
+    return receipt_generator.verify_receipt(request.receipt)
+
+
+# ─── Pillar 1: DSPy Teleprompter Distillation Compiler ─────────
+
+@router.get("/api/compiler/status")
+async def compiler_status():
+    """Get telemetry status of the DSPy distillation pipeline."""
+    return compiler_worker.get_status()
+
+
+@router.post("/api/compiler/compile")
+async def trigger_compilation():
+    """Manually trigger compilation of accumulated Case Law hard negatives."""
+    return compiler_worker.compile_signatures(force=True)
+
+
+# ─── Pillar 6: Live Guard vs Houdini Red-Team Arena ────────────
+
+@router.post("/api/redteam/run")
+async def run_redteam_attack(request: RedTeamRequest):
+    """Generate an adversarial Houdini attack and test TAO's Guard Slope."""
+    attack = houdini_agent.generate_attack(
+        task=request.task,
+        difficulty=request.difficulty,
+        custom_query=request.user_query or None,
+    )
+    pipeline = TAOPipeline()
+    tao_req = TAORequest(query=attack["query"])
+    response = await pipeline.analyze(tao_req)
+
+    tier1_caught = (response.tier1_result is not None and not response.tier1_result.passed)
+    tier2_caught = (response.tier2_result is not None and response.tier2_result.verdict == DebateVerdict.SKEPTIC_WINS)
+    tier3_caught = (response.tier3_result is not None and response.tier3_result.stego_analysis.alert_triggered)
+
+    flaw_caught = tier1_caught or tier2_caught or tier3_caught
+    guard_metrics = houdini_agent.compute_guard_slope([
+        {"difficulty": request.difficulty, "flaw_caught": flaw_caught}
+    ])
+
+    return {
+        "attack_metadata": attack,
+        "flaw_caught": flaw_caught,
+        "caught_by_tiers": {
+            "tier1": tier1_caught,
+            "tier2": tier2_caught,
+            "tier3": tier3_caught,
+        },
+        "guard_metrics": guard_metrics,
+        "pipeline_response": response.model_dump(),
+    }
 
 
 # ─── WebSocket for streaming pipeline events ──────────────────

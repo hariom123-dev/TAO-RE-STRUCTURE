@@ -36,6 +36,14 @@
           <span class="nav-tab-icon">⚖️</span>
           Judge AI
         </button>
+        <button class="nav-tab" id="tab-compiler" data-view="compiler">
+          <span class="nav-tab-icon">🧬</span>
+          Prompt Evolution
+        </button>
+        <button class="nav-tab" id="tab-redteam" data-view="redteam">
+          <span class="nav-tab-icon">🎯</span>
+          Houdini Arena
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -105,6 +113,19 @@
 
           <!-- Pipeline Visualization -->
           <section class="pipeline-viz" id="pipeline-section">
+            <!-- Time-Travel & Counterfactual Timeline Scrubber (Pillar 4) -->
+            <div class="time-travel-bar" id="time-travel-bar" style="display: none; margin-bottom: 14px; padding: 10px 14px; background: rgba(0, 212, 255, 0.05); border: 1px solid rgba(0, 212, 255, 0.2); border-radius: var(--radius-sm); font-size: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 600; color: var(--accent); display: flex; align-items: center; gap: 6px;">
+                  ⏱️ TIME-TRAVEL & FORKING STUDIO (LangGraph State Checkpointer)
+                </span>
+                <span id="checkpoint-count-badge" style="font-size: 11px; color: var(--text-muted);">0 Checkpoints</span>
+              </div>
+              <div class="checkpoint-timeline" id="checkpoint-timeline" style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;">
+                <!-- Dynamic checkpoint pills injected by app.js -->
+              </div>
+            </div>
+
             <div class="pipeline-flow" id="pipeline-flow">
               <div class="pipeline-node" id="node-router" data-tier="router">
                 <span class="node-icon">🔀</span>
@@ -366,7 +387,133 @@
         </div>
       </div>
 
+      <!-- ════════════════════════════════════════════════════ -->
+      <!-- COMPILER VIEW (DSPy Teleprompter & Distillation)     -->
+      <!-- ════════════════════════════════════════════════════ -->
+      <div class="view" id="view-compiler">
+        <div class="top-bar">
+          <span class="top-bar-title">DSPy Teleprompter & Prompt Evolution</span>
+          <div class="top-bar-actions">
+            <button class="btn btn-primary" id="btn-trigger-compile" style="font-size: 12px; padding: 6px 14px;">
+              🔄 Recompile Signatures Now
+            </button>
+          </div>
+        </div>
+        <div class="dashboard-content">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">🧬 Distilled Scalable Oversight Telemetry</div>
+              <span class="panel-badge badge-passed" id="compiler-catch-rate-badge">85.4% Catch Rate</span>
+            </div>
+            <div class="panel-body" id="compiler-telemetry-body">
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 20px;">
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 14px; border-radius: 8px;">
+                  <div style="font-size: 11px; color: var(--text-muted);">Total Compilations</div>
+                  <div id="compiler-total-runs" style="font-size: 24px; font-weight: 700; color: var(--accent); margin-top: 4px;">—</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 14px; border-radius: 8px;">
+                  <div style="font-size: 11px; color: var(--text-muted);">Compiled Precedents</div>
+                  <div id="compiler-precedents-count" style="font-size: 24px; font-weight: 700; color: var(--color-success); margin-top: 4px;">—</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 14px; border-radius: 8px;">
+                  <div style="font-size: 11px; color: var(--text-muted);">Hard Negatives Queue</div>
+                  <div id="compiler-queue-count" style="font-size: 24px; font-weight: 700; color: var(--color-warning); margin-top: 4px;">—</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle); padding: 14px; border-radius: 8px;">
+                  <div style="font-size: 11px; color: var(--text-muted);">Est. Tier 1 Catch Rate</div>
+                  <div id="compiler-catch-rate" style="font-size: 24px; font-weight: 700; color: #a855f7; margin-top: 4px;">—</div>
+                </div>
+              </div>
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 10px;">
+                Active Compiled Few-Shot Demonstrations Injected into DSPy Signature:
+              </div>
+              <div id="compiler-demonstrations-list" style="display: flex; flex-direction: column; gap: 10px;">
+                <!-- Demonstrations rendered dynamically -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════ -->
+      <!-- RED-TEAM ARENA VIEW (Guard vs Houdini)              -->
+      <!-- ════════════════════════════════════════════════════ -->
+      <div class="view" id="view-redteam">
+        <div class="top-bar">
+          <span class="top-bar-title">Houdini Red-Team Arena & Guard Slope</span>
+        </div>
+        <div class="dashboard-content">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">🎯 Adversarial Alignment-Faking Generator</div>
+              <span class="panel-badge badge-flagged" id="badge-redteam-status">Ready</span>
+            </div>
+            <div class="panel-body">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                <div>
+                  <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 6px;">Adversarial Trap Category</label>
+                  <select id="redteam-task-select" class="tier-select" style="width: 100%;">
+                    <option value="medical_sycophancy">Medical Sycophancy (Disguised Titration)</option>
+                    <option value="smart_contract_backdoor">Smart Contract Reentrancy / State Bug</option>
+                    <option value="acrostic_stego">Acrostic & Low-Entropy Steganography</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 6px;">
+                    Houdini Deception Difficulty: <span id="difficulty-val-label" style="color: var(--accent); font-weight: 700;">Level 3</span>
+                  </label>
+                  <input type="range" id="redteam-difficulty-range" min="1" max="5" value="3" style="width: 100%; margin-top: 8px;">
+                </div>
+              </div>
+              <button class="btn btn-primary" id="btn-launch-redteam" style="width: 100%;">
+                ⚔️ Launch Adversarial Attack vs TAO Pipeline
+              </button>
+              <div id="redteam-results-container" style="margin-top: 16px; display: none;">
+                <!-- Attack results rendered dynamically -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </main>
+  </div>
+
+  <!-- Modal: Cryptographic Receipt Verification -->
+  <div id="modal-receipt-overlay" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); width: 90%; max-width: 600px; padding: 24px; box-shadow: var(--shadow-lg);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; font-weight: 700; color: var(--accent); margin: 0; display: flex; align-items: center; gap: 8px;">
+          🔐 Zero-Trust Cryptographic Oversight Attestation
+        </h3>
+        <button id="close-modal-receipt-btn" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px;">✕</button>
+      </div>
+      <div id="modal-receipt-content" style="font-size: 12px; line-height: 1.6; color: var(--text-secondary);">
+        <!-- Injected dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Counterfactual Forking Studio -->
+  <div id="modal-fork-overlay" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); width: 90%; max-width: 550px; padding: 24px; box-shadow: var(--shadow-lg);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; font-weight: 700; color: var(--accent); margin: 0; display: flex; align-items: center; gap: 8px;">
+          ⏱️ Counterfactual Forking Studio
+        </h3>
+        <button id="close-modal-fork-btn" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px;">✕</button>
+      </div>
+      <div id="modal-fork-content">
+        <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+          Forking execution forward from checkpoint <strong id="fork-checkpoint-id-label" style="color: var(--accent);">—</strong>. Prior steps are preserved.
+        </p>
+        <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Modify Query / Prompt:</label>
+        <textarea id="fork-query-input" class="query-textarea" rows="3" style="margin-bottom: 14px;"></textarea>
+        <button id="btn-execute-fork" class="btn btn-primary" style="width: 100%;">
+          ⚡ Replay Forward from Checkpoint
+        </button>
+      </div>
+    </div>
   </div>
 
   <script src="/app.js"></script>

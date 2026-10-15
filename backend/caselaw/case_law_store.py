@@ -142,6 +142,50 @@ class CaseLawStore:
         self._precedents.append(precedent)
         return precedent
 
+    def add_hard_negative(
+        self,
+        query: str,
+        flawed_cot: str,
+        skeptic_critique: str,
+        judge_verdict: DebateVerdict,
+        confidence: float,
+        domain: str = "general",
+    ) -> CaseLawPrecedent:
+        """
+        Record a labeled hard-negative where Tier 1 missed a subtle flaw
+        and Tier 2 Skeptic/Judge overturned it with high confidence.
+        """
+        new_id = f"CASE-{time.strftime('%Y')}-NEG-{len(self._precedents) + 1:03d}"
+        summary = (
+            f"HARD-NEGATIVE PRECEDENT: Flawed CoT: '{flawed_cot[:120]}...' "
+            f"Overturned by Skeptic Critique: '{skeptic_critique[:120]}...'. "
+            f"Verdict: {verdict_val if hasattr((verdict_val := judge_verdict), 'value') else judge_verdict}."
+        )
+        precedent = CaseLawPrecedent(
+            id=new_id,
+            query=query,
+            domain=domain,
+            verdict=judge_verdict,
+            summary_ruling=summary,
+            confidence=confidence,
+            tokens_saved=3200,
+            latency_saved_ms=36000.0,
+            hard_negative=True,
+            compiled_to_dspy=False,
+        )
+        self._precedents.append(precedent)
+        return precedent
+
+    def get_uncompiled_precedents(self, limit: int = 10) -> list[CaseLawPrecedent]:
+        """Retrieve hard-negative precedents not yet compiled into DSPy signatures."""
+        return [p for p in self._precedents if p.hard_negative and not p.compiled_to_dspy][:limit]
+
+    def mark_compiled(self, precedent_ids: list[str]):
+        """Mark precedents as compiled into active DSPy signatures."""
+        for p in self._precedents:
+            if p.id in precedent_ids:
+                p.compiled_to_dspy = True
+
     def get_all(self) -> list[CaseLawPrecedent]:
         return list(self._precedents)
 

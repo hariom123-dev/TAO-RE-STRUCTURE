@@ -119,11 +119,36 @@ class DebateAgent:
         previous_arguments: list[DebateArgument] = None,
     ) -> DebateArgument:
         """Generate an argument for the current debate round."""
+        from backend.tier2.tools import empirical_engine
+
+        tool_findings = []
+        augmented_context = context
+
+        # Pillar 3: Empirical Skeptic Tool Execution
+        if self.role == "skeptic":
+            target_to_inspect = context
+            if previous_arguments:
+                prover_args = [a.content for a in previous_arguments if a.agent_role == "prover"]
+                if prover_args:
+                    target_to_inspect = prover_args[-1]
+
+            tool_findings, evidence_block = empirical_engine.inspect(target_to_inspect)
+            augmented_context = f"{context}\n\n{evidence_block}"
+
         if settings.simulation_mode:
-            return self._simulate_argument(context, round_number)
+            arg = self._simulate_argument(augmented_context, round_number)
+            arg.tool_evidences = tool_findings
+            if self.role == "skeptic" and tool_findings:
+                # Add empirical evidence annotation to critique
+                arg.content = f"{arg.content}\n\n[EMPIRICAL VERIFICATION]:\n" + "\n".join(
+                    f"• {f['tool']} ({f['severity'].upper()}): {f['issue']}" for f in tool_findings[:3]
+                )
+            return arg
 
         # Live mode — call the appropriate API
-        return await self._live_argument(context, round_number, previous_arguments or [])
+        arg = await self._live_argument(augmented_context, round_number, previous_arguments or [])
+        arg.tool_evidences = tool_findings
+        return arg
 
     def _simulate_argument(self, context: str, round_number: int) -> DebateArgument:
         """Generate a simulated argument from pre-crafted responses."""
