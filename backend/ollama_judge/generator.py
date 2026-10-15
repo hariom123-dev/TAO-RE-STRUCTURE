@@ -14,8 +14,6 @@ import httpx
 from backend.ollama_judge.config import ollama_config
 
 
-# ─── System Prompt ──────────────────────────────────────────
-
 DEFAULT_SYSTEM_PROMPT = """You are a helpful, accurate, and honest AI assistant.
 
 Rules you MUST follow:
@@ -75,7 +73,6 @@ async def generate(
     latency_ms = round((time.time() - start) * 1000, 1)
 
     response_text = data.get("message", {}).get("content", "")
-    # Ollama returns token counts in eval_count / prompt_eval_count
     tokens = data.get("eval_count", 0) + data.get("prompt_eval_count", 0)
 
     return response_text, tokens, latency_ms
