@@ -55,6 +55,8 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """Full output from the /chat endpoint."""
+    model_config = {"protected_namespaces": ()}
+
     request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     message: str  # Original user message
     response: str  # Final approved response

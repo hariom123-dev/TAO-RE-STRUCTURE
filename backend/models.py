@@ -68,6 +68,8 @@ class ConstitutionalPrinciple(BaseModel):
     name: str
     description: str
     severity: ViolationSeverity = ViolationSeverity.VIOLATION
+    is_active: bool = True
+    weight: float = 1.0
 
 
 class ConstitutionalViolation(BaseModel):

@@ -44,6 +44,10 @@
           <span class="nav-tab-icon">🎯</span>
           Houdini Arena
         </button>
+        <button class="nav-tab" id="tab-constitution" data-view="constitution">
+          <span class="nav-tab-icon">📜</span>
+          Safety Constitution
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -477,10 +481,121 @@
               </div>
             </div>
           </div>
+
+          <!-- Attack-in-the-Middle Live Battery Runner -->
+          <div class="panel" style="margin-top: 16px;">
+            <div class="panel-header">
+              <div class="panel-title">🛡️ Live Attack-in-the-Middle Battery Simulator</div>
+              <span class="panel-badge badge-passed" id="badge-battery-status">Standby</span>
+            </div>
+            <div class="panel-body">
+              <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+                Fires automated attack payload batteries (injections, jailbreaks, sycophancy traps, stego) against the gateway to compute your enterprise <strong>Defensive Success Rate (DSR)</strong>.
+              </p>
+              
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-xs); padding: 12px; text-align: center;">
+                  <div style="font-size: 11px; color: var(--text-muted);">Defensive Success Rate</div>
+                  <div id="stat-battery-dsr" style="font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 4px;">100.0%</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-xs); padding: 12px; text-align: center;">
+                  <div style="font-size: 11px; color: var(--text-muted);">Attacks Tested</div>
+                  <div id="stat-battery-total" style="font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 4px;">0</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-xs); padding: 12px; text-align: center;">
+                  <div style="font-size: 11px; color: var(--text-muted);">Intercepted</div>
+                  <div id="stat-battery-intercepted" style="font-size: 20px; font-weight: 700; color: #10b981; margin-top: 4px;">0</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: var(--radius-xs); padding: 12px; text-align: center;">
+                  <div style="font-size: 11px; color: var(--text-muted);">Breached</div>
+                  <div id="stat-battery-breached" style="font-size: 20px; font-weight: 700; color: #ef4444; margin-top: 4px;">0</div>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+                <button class="btn btn-primary" id="btn-run-attack-battery" style="flex: 1;">
+                  🚀 Launch Attack Battery (7 Vectors)
+                </button>
+                <button class="btn" id="btn-export-audit-report" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); color: var(--text-primary);">
+                  📥 Download Audit Report (.MD)
+                </button>
+              </div>
+
+              <div id="battery-results-log" style="display: none; background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-xs); padding: 12px; max-height: 220px; overflow-y: auto; font-size: 11px; font-family: monospace;">
+                <!-- Attack events rendered dynamically -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ════════════════════════════════════════════════════ -->
+      <!-- CONSTITUTION & SAFETY RULES POLICY EDITOR            -->
+      <!-- ════════════════════════════════════════════════════ -->
+      <div class="view" id="view-constitution">
+        <div class="top-bar">
+          <span class="top-bar-title">📜 Constitutional Safety Principles & Policy Editor</span>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-primary" id="btn-open-add-principle" style="padding: 6px 14px; font-size: 12px;">
+              ➕ Add Principle
+            </button>
+            <button class="btn" id="btn-reset-constitution" style="padding: 6px 14px; font-size: 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-muted);">
+              🔄 Reset Defaults
+            </button>
+          </div>
+        </div>
+        <div class="dashboard-content">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Active Safety Rules Governing Tier 1 Process Supervision</div>
+              <span class="panel-badge badge-passed" id="badge-active-principles-count">12 Active</span>
+            </div>
+            <div class="panel-body">
+              <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
+                Changes take effect <strong>instantly</strong> in the Process Supervisor and DSPy contracts without server restart.
+              </p>
+              <div id="constitution-principles-container" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px;">
+                <!-- Injected dynamically -->
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
     </main>
+  </div>
+
+  <!-- Modal: Add Constitutional Principle -->
+  <div id="modal-add-principle-overlay" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); width: 90%; max-width: 500px; padding: 24px; box-shadow: var(--shadow-lg);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; font-weight: 700; color: var(--accent); margin: 0; display: flex; align-items: center; gap: 8px;">
+          ➕ Add Constitutional Safety Principle
+        </h3>
+        <button id="close-modal-add-principle-btn" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px;">✕</button>
+      </div>
+      <div>
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Principle Name:</label>
+          <input type="text" id="new-principle-name" class="query-textarea" style="height: 36px; padding: 8px 12px; width: 100%;" placeholder="e.g. No Unverified Crypto Advice">
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Severity:</label>
+          <select id="new-principle-severity" class="tier-select" style="width: 100%;">
+            <option value="critical">CRITICAL (Immediate Refusal)</option>
+            <option value="violation" selected>VIOLATION (Requires Backtrack)</option>
+            <option value="warning">WARNING (Flagged for Review)</option>
+          </select>
+        </div>
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Rule Description:</label>
+          <textarea id="new-principle-desc" class="query-textarea" rows="3" style="width: 100%;" placeholder="Specify the behavioral constraint..."></textarea>
+        </div>
+        <button id="btn-save-new-principle" class="btn btn-primary" style="width: 100%;">
+          💾 Save Principle
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- Modal: Cryptographic Receipt Verification -->

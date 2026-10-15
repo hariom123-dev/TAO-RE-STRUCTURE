@@ -8,11 +8,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from backend.api.routes import router
 from backend.api.openai_proxy import proxy_router
 from backend.ollama_judge.routes import judge_router
+from backend.api.prometheus_exporter import prometheus_exporter
 from backend.config import settings
 
 app = FastAPI(
@@ -34,6 +35,15 @@ app.add_middleware(
 app.include_router(router)
 app.include_router(proxy_router)
 app.include_router(judge_router)
+
+
+@app.get("/metrics")
+async def get_metrics():
+    """Prometheus OpenMetrics endpoint."""
+    return PlainTextResponse(
+        content=prometheus_exporter.export_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
 
 # ─── Static Files (Frontend) ──────────────────────────────────
 frontend_dir = Path(__file__).parent.parent / "frontend"

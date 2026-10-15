@@ -1,8 +1,8 @@
 import asyncio
 import json
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, Header, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, WebSocket, WebSocketDisconnect
 from backend.models import (
     ConstitutionalPrinciple,
     DebateVerdict,
@@ -71,7 +71,99 @@ async def get_constitution():
 async def update_constitution(principle: ConstitutionalPrinciple):
     """Add or update a constitutional principle."""
     _constitution_store.add(principle)
+    event_bus.publish_event(
+        event_type="CONSTITUTION_MODIFIED",
+        severity="INFO",
+        details={"action": "add_or_update", "principle_id": principle.id, "name": principle.name},
+    )
     return {"status": "updated", "principle": principle.model_dump()}
+
+
+@router.put("/api/constitution/{principle_id}")
+async def mutate_principle(principle_id: str, updates: dict[str, Any]):
+    """Toggle, re-weight, or update an existing constitutional principle."""
+    principle = _constitution_store.get(principle_id)
+    if not principle:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Principle not found.")
+
+    if "is_active" in updates:
+        _constitution_store.toggle(principle_id, bool(updates["is_active"]))
+    if "weight" in updates:
+        _constitution_store.update_weight(principle_id, float(updates["weight"]))
+    if "description" in updates:
+        principle.description = str(updates["description"])
+    if "severity" in updates:
+        principle.severity = updates["severity"]
+
+    updated = _constitution_store.get(principle_id)
+    event_bus.publish_event(
+        event_type="CONSTITUTION_MODIFIED",
+        severity="INFO",
+        details={"action": "mutate", "principle_id": principle_id, "updates": updates},
+    )
+    return {"status": "success", "principle": updated.model_dump() if updated else {}}
+
+
+@router.post("/api/constitution/reset")
+async def reset_constitution():
+    """Reset all constitutional principles back to Anthropic factory defaults."""
+    _constitution_store.reset_defaults()
+    event_bus.publish_event(
+        event_type="CONSTITUTION_MODIFIED",
+        severity="WARNING",
+        details={"action": "reset_to_factory_defaults"},
+    )
+    return {
+        "status": "reset",
+        "principles": [p.model_dump() for p in _constitution_store.principles],
+        "total": len(_constitution_store.principles),
+    }
+
+
+# ─── Enterprise SIEM Event Bus Routes ─────────────────────────
+
+from backend.state.event_bus import event_bus
+
+
+@router.get("/api/events/subscribers")
+async def list_event_subscribers():
+    """List active SIEM and webhook subscribers."""
+    return {"subscribers": [s.model_dump() for s in event_bus.list_subscribers()]}
+
+
+@router.post("/api/events/subscribers")
+async def create_event_subscriber(body: dict[str, Any]):
+    """Register a new Datadog, Splunk, Sentinel, or Webhook subscriber."""
+    url = body.get("url")
+    if not url:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Subscriber 'url' is required.")
+    sub = event_bus.add_subscriber(
+        url=url,
+        secret_key=body.get("secret_key"),
+        target_siem=body.get("target_siem", "generic"),
+        subscribed_events=body.get("subscribed_events", ["*"]),
+    )
+    return {"status": "registered", "subscriber": sub.model_dump()}
+
+
+@router.delete("/api/events/subscribers/{sub_id}")
+async def delete_event_subscriber(sub_id: str):
+    """Unsubscribe a webhook or SIEM destination."""
+    removed = event_bus.remove_subscriber(sub_id)
+    return {"status": "removed" if removed else "not_found", "subscriber_id": sub_id}
+
+
+@router.post("/api/events/test")
+async def send_test_event(event_type: str = "TEST_PROBE"):
+    """Trigger a synthetic security test event across all subscribers."""
+    evt = event_bus.publish_event(
+        event_type=event_type,
+        severity="INFO",
+        details={"message": "Synthetic test event dispatched from TAO Operations Studio."},
+    )
+    return {"status": "dispatched", "event": evt.model_dump()}
 
 
 @router.get("/api/history")
@@ -202,6 +294,72 @@ async def run_redteam_attack(request: RedTeamRequest):
         "guard_metrics": guard_metrics,
         "pipeline_response": response.model_dump(),
     }
+
+
+# ─── Live Attack-in-the-Middle Battery Endpoints ───────────────
+
+from backend.redteam.battery_runner import battery_runner
+
+
+@router.post("/api/redteam/battery/run")
+async def run_battery_simulation(body: Optional[dict[str, Any]] = None):
+    """Run an automated battery of attacks and record Defensive Success Rate (DSR)."""
+    custom_cases = body.get("cases") if body else None
+    return await battery_runner.run_battery(custom_cases)
+
+
+@router.get("/api/redteam/battery/status")
+async def get_battery_status():
+    """Get real-time Defensive Success Rate and recent attack history."""
+    dsr = battery_runner.get_dsr()
+    history = battery_runner.get_history(limit=20)
+    return {
+        "dsr": dsr,
+        "history": [h.model_dump() for h in history],
+    }
+
+
+@router.get("/api/redteam/battery/export")
+async def export_battery_audit(format: str = "markdown"):
+    """Export compliance audit report in Markdown or JSON format."""
+    report_content = battery_runner.export_audit_report(format=format)
+    from fastapi.responses import PlainTextResponse
+    media = "application/json" if format == "json" else "text/markdown; charset=utf-8"
+    return PlainTextResponse(content=report_content, media_type=media)
+
+
+# ─── Multi-Tenant RBAC Identity Routes ─────────────────────────
+
+from backend.auth.rbac import UserProfile, UserRole, require_role, rbac_manager
+
+
+@router.get("/api/auth/me")
+async def get_my_profile(current_user: UserProfile = Depends(require_role(UserRole.VIEWER))):
+    """Get the authenticated caller's identity and active role."""
+    return current_user.model_dump()
+
+
+@router.get("/api/auth/users")
+async def list_org_users(current_user: UserProfile = Depends(require_role(UserRole.ADMIN))):
+    """List users within the caller's organization (Admin only)."""
+    users = rbac_manager.list_users(org_id=current_user.org_id)
+    return {"users": [u.model_dump() for u in users]}
+
+
+@router.post("/api/auth/users")
+async def create_org_user(body: dict[str, Any], current_user: UserProfile = Depends(require_role(UserRole.ADMIN))):
+    """Provision a new user and API key (Admin only)."""
+    email = body.get("email")
+    role_str = body.get("role", "developer")
+    if not email:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="User email is required.")
+    new_user = rbac_manager.create_user(
+        org_id=current_user.org_id,
+        email=email,
+        role=UserRole(role_str),
+    )
+    return {"status": "created", "user": new_user.model_dump()}
 
 
 # ─── WebSocket for streaming pipeline events ──────────────────

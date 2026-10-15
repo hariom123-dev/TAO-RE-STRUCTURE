@@ -7,7 +7,7 @@
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI%20%7C%20WebSockets-009688.svg)](#)
 [![LangGraph](https://img.shields.io/badge/Orchestration-LangGraph-orange.svg)](#)
 [![DSPy](https://img.shields.io/badge/Prompting-DSPy-yellow.svg)](#)
-[![Tests](https://img.shields.io/badge/Tests-24%2F24%20Passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-32%2F32%20Passing-brightgreen.svg)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
 
 <br>
@@ -207,19 +207,80 @@ When Tier 2 debate deadlocks after 3 rounds or Tier 3 triggers a persistent steg
 
 ---
 
+## 🏢 Enterprise Production Infrastructure
+
+### 1. Multi-Tenant Organization & RBAC Gateway
+Secure multi-tenancy with 4 granular roles: `Viewer`, `Developer`, `SecurityOfficer`, and `Admin`.
+*   **Storage:** Lightweight embedded SQLite database (`backend/state/rbac.sqlite`) using native Python standard libraries.
+*   **Header Authentication:** Supports standard `Authorization: Bearer <token>` and `X-TAO-API-Key: <key>`.
+*   **Pre-Seeded Roles:** Includes out-of-the-box development keys (`tao-key-viewer-telemetry`, `tao-key-developer-general`, `tao-key-security-audit`, `tao-key-admin-root`) with permissive localhost development fallback.
+
+---
+
+### 2. Automated Prompt Injection & Jailbreak Pre-Filter (Tier -1)
+A sub-millisecond (<0.2ms) zero-token perimeter firewall that intercepts attacks before the LLM runs:
+*   **Direct Jailbreak Signatures:** Catches `ignore all previous instructions`, `DAN mode`, `developer mode override`, `bypass safety rules`, etc.
+*   **Smuggling Defense:** Automatically strips and decodes zero-width characters (`\u200B`–`\u200F`) and Base64-encoded payload blocks.
+*   **Entropy Spikes:** Detects high Shannon entropy ($H > 4.75$) character scrambling.
+*   **Zero-Token Rejection:** Intercepted requests bypass reasoning models completely, consuming 0 tokens and instantly producing a cryptographically signed refusal receipt.
+
+---
+
+### 3. Live Adversarial Red-Team Simulator ("Attack-in-the-Middle" Mode)
+Automated testing battery evaluating model resilience against 7 attack vectors:
+*   **Attack Vectors:** `direct_jailbreak`, `prompt_injection`, `sycophancy_trap`, `covert_steganography`, `destructive_tool_execution`, `base64_smuggling`, and `hallucination_bait`.
+*   **Defended Success Rate (DSR):** Tracks the live percentage of adversarial attempts successfully blocked across a 200-event ring buffer.
+*   **Compliance Audit Reports:** One-click export of structured reports in JSON and executive Markdown formats for SOC2/ISO-27001 compliance.
+
+---
+
+### 4. Policy Drift & Latency Analytics (Prometheus OpenMetrics `/metrics`)
+Exposes an industry-standard OpenMetrics 0.0.4 endpoint for Datadog, Prometheus, Grafana, and CloudWatch:
+*   `tao_requests_total`: Total requests partitioned by tier and status (`allowed`, `blocked`, `neutralized`).
+*   `tao_request_duration_seconds`: Histogram measuring execution latency across all tiers.
+*   `tao_cache_hits_total` & `tao_usd_saved_total`: Tracks Case Law caching hits and cumulative USD saved.
+*   `tao_stego_alerts_total` & `tao_tool_blocks_total`: Security telemetry counters.
+*   `tao_defended_success_rate`: Live gauge of current defense resilience.
+
+---
+
+### 5. Interactive Policy Editor UI for Constitutional Rules
+Hot-reload constitutional safety rules directly from the dashboard:
+*   **Dynamic Toggling & Priority Weighting:** Adjust rule enforcement weights ($0.1\times - 5.0\times$) in real-time.
+*   **Custom Rules:** Add enterprise-specific guidelines (e.g., healthcare HIPAA constraints or financial trading limits).
+*   **Factory Reset:** Instantly revert to default constitutional baselines without server restart.
+
+---
+
+### 6. Asynchronous Webhook Event Bus & SIEM Integration
+Thread-safe pub-sub event bus streaming audit events to external enterprise SIEM platforms:
+*   **Supported Formats:** Generic JSON webhooks, Datadog Event API (`/api/v1/series`), and Splunk HEC (`/services/collector/raw`).
+*   **Cryptographic Attestation:** Outgoing webhook payloads are signed with an `X-TAO-Event-Signature` HMAC-SHA256 digest.
+*   **Non-Blocking:** Dispatches HTTP webhooks asynchronously in background tasks without adding latency to agent queries.
+
+---
+
 ## 🔌 API Reference
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/v1/chat/completions` | Drop-in OpenAI-compatible proxy with receipt headers and tool firewall. |
-| `POST` | `/api/analyze` | Native endpoint running full TAO pipeline with BYOK header support. |
-| `WS` | `/ws/pipeline` | Streams live node transitions, PRM trees, debate rounds, and heatmaps to the UI. |
-| `POST` | `/api/verify-receipt` | Cryptographically verifies the 5-leaf SHA-256 Merkle root and HMAC signature. |
-| `GET` | `/api/pipeline/checkpoints/{id}` | Lists saved `IncidentState` snapshots for Time-Travel inspection. |
-| `POST` | `/api/pipeline/fork` | Mutates state at a historical checkpoint and replays downstream tiers. |
-| `GET` | `/api/compiler/status` | Returns DSPy teleprompter compilation metrics and Tier 1 catch-rate gains. |
-| `POST` | `/api/compiler/compile` | Distills uncompiled Tier 2 Case Law precedents into Tier 1 few-shot prompts. |
-| `POST` | `/api/redteam/run` | Pits the Houdini adversarial agent against TAO and computes the Guard Slope. |
+| Method | Endpoint | Role Required | Description |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/v1/chat/completions` | `Developer` | Drop-in OpenAI-compatible proxy with receipt headers and tool firewall. |
+| `POST` | `/api/analyze` | `Developer` | Native endpoint running full TAO pipeline with BYOK header support. |
+| `GET` | `/metrics` | `Viewer` | Prometheus OpenMetrics 0.0.4 exporter for Grafana & Datadog. |
+| `WS` | `/ws/pipeline` | `Viewer` | Streams live node transitions, PRM trees, debate rounds, and heatmaps to the UI. |
+| `POST` | `/api/verify-receipt` | `Viewer` | Cryptographically verifies the 5-leaf SHA-256 Merkle root and HMAC signature. |
+| `GET` | `/api/pipeline/checkpoints/{id}` | `Viewer` | Lists saved `IncidentState` snapshots for Time-Travel inspection. |
+| `POST` | `/api/pipeline/fork` | `Developer` | Mutates state at a historical checkpoint and replays downstream tiers. |
+| `GET` | `/api/constitution` | `Viewer` | Returns all active and inactive constitutional safety rules. |
+| `PUT` | `/api/constitution/{id}` | `SecurityOfficer` | Toggles principle activation state or updates priority weight. |
+| `POST` | `/api/constitution` | `SecurityOfficer` | Registers a new custom enterprise safety principle. |
+| `POST` | `/api/constitution/reset` | `Admin` | Resets all principles back to default constitutional baselines. |
+| `POST` | `/api/redteam/battery/start` | `SecurityOfficer` | Launches automated 7-vector adversarial attack battery. |
+| `GET` | `/api/redteam/battery/status` | `Viewer` | Returns live DSR, recent attack logs, and battery progress. |
+| `GET` | `/api/redteam/battery/export` | `Viewer` | Exports compliance audit report in JSON or Markdown format. |
+| `GET` | `/api/events/logs` | `Viewer` | Returns in-memory SIEM event ring buffer. |
+| `POST` | `/api/events/subscribers` | `SecurityOfficer` | Registers an external SIEM webhook (Datadog/Splunk). |
+| `GET` | `/api/auth/me` | `Viewer` | Returns authenticated user role and tenant organization details. |
 
 ---
 
@@ -227,6 +288,7 @@ When Tier 2 debate deadlocks after 3 rounds or Tier 3 triggers a persistent steg
 
 | Tier | Oversight Mechanism | Latency Impact | Token Multiplier | Target Use Cases |
 | :--- | :--- | :--- | :--- | :--- |
+| **Tier -1** | Perimeter Pre-Filter | **< 0.2ms** | **0.0x (Early Refusal)** | Known jailbreaks, base64 smuggling, entropy anomalies |
 | **Tier 0** | Direct Pass-Through | Baseline (~2s) | **1.0x** | Casual greetings, low-risk queries[cite: 9] |
 | **Tier 1** | Constitutional $\Omega\text{PRM}$ + ToT | +20–40% | **1.2x** | Customer support, general content generation[cite: 9] |
 | **Tier 2** | 3-Round Empirical Debate | +500–800% (or **<50ms** on Case Law hit) | **6.87x** (**1.05x** cached) | Medical, legal, financial, code deployment[cite: 9] |
@@ -235,7 +297,7 @@ When Tier 2 debate deadlocks after 3 rounds or Tier 3 triggers a persistent steg
 ---
 
 ## 🧪 Verification & Automated Test Suite
-Validate all 14 core and frontier alignment test cases (DSPy contracts, $\Omega\text{PRM}$ bisection, Empirical Skeptic tools, Case Law caching, Time-Travel forking, CUSUM stego detection, Houdini Guard Slope, and Merkle receipts):
+Validate all 32 core, frontier, real-world, and enterprise test cases (DSPy contracts, $\Omega\text{PRM}$ bisection, Empirical Skeptic tools, Case Law caching, Time-Travel forking, CUSUM stego detection, Merkle receipts, OpenAI proxy, Tool firewall, RBAC gateway, Prometheus exporter, Constitution editor, SIEM event bus, and Tier -1 pre-filter):
 
 ```bash
 .\.venv\Scripts\python -m pytest tests/ -v

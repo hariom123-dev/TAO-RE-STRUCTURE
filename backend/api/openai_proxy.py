@@ -105,7 +105,9 @@ async def chat_completions(
     response.headers["X-TAO-Request-ID"] = tao_result.request_id
 
     verdict_str = "pass"
-    if tao_result.tier2_result:
+    if "Perimeter Intercept - Tier -1" in tao_result.final_response:
+        verdict_str = "prompt_injection_blocked"
+    elif tao_result.tier2_result:
         verdict_str = tao_result.tier2_result.verdict.value
     elif tao_result.tier1_result and not tao_result.tier1_result.passed:
         verdict_str = "tier1_flagged"

@@ -16,8 +16,10 @@ import time
 import uuid
 from typing import AsyncGenerator, Callable, Optional
 
+from backend.api.prometheus_exporter import prometheus_exporter
 from backend.caselaw.case_law_store import case_law_store
 from backend.config import settings
+from backend.guardrails.pre_filter import prompt_pre_filter
 from backend.guardrails.receipt_generator import receipt_generator
 from backend.guardrails.validator import guardrails_validator
 from backend.models import (
@@ -26,6 +28,8 @@ from backend.models import (
     GuardrailsResult,
     PipelineEvent,
     PipelineMetrics,
+    RiskLevel,
+    RoutingDecision,
     TAOReceipt,
     TAORequest,
     TAOResponse,
@@ -89,6 +93,38 @@ class TAOPipeline:
         start_time = time.time()
         metrics = PipelineMetrics()
         req_id = request.session_id or str(uuid.uuid4())
+
+        # ── Step 0: Tier -1 Perimeter Pre-Filter (< 0.2ms) ───
+        pre_filter_res = prompt_pre_filter.scan(request.query)
+        if not pre_filter_res.allowed:
+            await self._emit(
+                "tier_minus_1_blocked",
+                tier=-1,
+                data={
+                    "violation_type": pre_filter_res.violation_type,
+                    "details": pre_filter_res.details,
+                    "latency_ms": pre_filter_res.latency_ms,
+                },
+            )
+            metrics.total_latency_ms = round((time.time() - start_time) * 1000, 2)
+            metrics.total_tokens = 0
+            metrics.tier_executed = TierLevel.TIER_0
+            refusal_response = (
+                f"🛡️ [TAO Perimeter Intercept - Tier -1]: Request blocked due to {pre_filter_res.violation_type}. "
+                f"{pre_filter_res.details}"
+            )
+            blocked_response = TAOResponse(
+                request_id=req_id,
+                query=request.query,
+                routing=RoutingDecision(tier=TierLevel.TIER_0, risk_level=RiskLevel.HIGH, risk_score=1.0, domain="adversarial"),
+                final_response=refusal_response,
+                metrics=metrics,
+                receipt=None,
+            )
+            blocked_response.receipt = receipt_generator.generate_receipt(blocked_response)
+            prometheus_exporter.record_prompt_injection_block()
+            _history.append(blocked_response)
+            return blocked_response
 
         # ── Step 1: Route & Complexity Triage ─────────────────
         await self._emit("routing", data={"query": request.query})
@@ -353,6 +389,21 @@ class TAOPipeline:
                 )
 
                 if tier3_result.stego_analysis.alert_triggered or tier3_result.cusum_alert_triggered:
+                    prometheus_exporter.record_stego_alert(is_cusum=tier3_result.cusum_alert_triggered)
+                    try:
+                        from backend.state.event_bus import event_bus
+                        event_bus.publish_event(
+                            event_type="STEGO_DETECTED",
+                            severity="CRITICAL",
+                            details={
+                                "kl_divergence": tier3_result.stego_analysis.kl_divergence,
+                                "cusum_drift": tier3_result.cusum_drift_score,
+                                "paraphrased": tier3_result.paraphrased,
+                            },
+                            request_id=req_id,
+                        )
+                    except Exception:
+                        pass
                     hitl_payload = hitl_manager.create_payload(
                         request_id=req_id,
                         trigger_reason=f"Steganography Sentinel Alert (KL: {tier3_result.stego_analysis.kl_divergence:.3f}, CUSUM: {tier3_result.cusum_drift_score:.3f})",
@@ -424,6 +475,12 @@ class TAOPipeline:
                 "case_law_applied": case_law_applied,
             },
         )
+
+        # Record Prometheus Telemetry
+        tier_label = f"tier_{routing.tier.value}"
+        prometheus_exporter.record_request(tier_label, metrics.total_latency_ms)
+        if metrics.usd_saved_by_cache > 0 or metrics.usd_saved_by_routing > 0:
+            prometheus_exporter.record_usd_savings(metrics.usd_saved_by_routing, metrics.usd_saved_by_cache)
 
         # Store in history
         _history.append(response)

@@ -49,6 +49,10 @@ function switchView(viewName) {
     loadCompilerStatus();
   } else if (viewName === 'redteam') {
     document.title = 'TAO — Houdini Red-Team Arena';
+    loadBatteryStatus();
+  } else if (viewName === 'constitution') {
+    document.title = 'TAO — Safety Constitution';
+    loadConstitutionPrinciples();
   }
 }
 
@@ -1618,3 +1622,301 @@ async function launchRedTeamAttack() {
     btn.innerHTML = '⚔️ Launch Adversarial Attack vs TAO Pipeline';
   }
 }
+
+
+// ═══════════════════════════════════════════════════════════
+// CONSTITUTION POLICY EDITOR LOGIC
+// ═══════════════════════════════════════════════════════════
+
+async function loadConstitutionPrinciples() {
+  const container = document.getElementById('constitution-principles-container');
+  const badgeCount = document.getElementById('badge-active-principles-count');
+  if (!container) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/constitution`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const principles = data.principles || [];
+
+    const activeCount = principles.filter(p => p.is_active).length;
+    if (badgeCount) badgeCount.textContent = `${activeCount} / ${principles.length} Active`;
+
+    renderConstitutionPrinciples(principles);
+  } catch (err) {
+    container.innerHTML = `<div style="color: var(--color-danger); font-size: 12px;">Failed to load principles: ${err.message}</div>`;
+  }
+}
+
+function renderConstitutionPrinciples(principles) {
+  const container = document.getElementById('constitution-principles-container');
+  if (!container) return;
+
+  container.innerHTML = principles.map(p => {
+    const isAct = p.is_active !== false;
+    const severityColor = p.severity === 'critical' ? 'var(--color-danger)' : (p.severity === 'violation' ? '#f59e0b' : 'var(--accent)');
+    return `
+      <div class="animate-in" style="background: rgba(255,255,255,0.03); border: 1px solid ${isAct ? 'var(--border-color)' : 'rgba(255,255,255,0.05)'}; border-radius: var(--radius-sm); padding: 14px; display: flex; flex-direction: column; justify-content: space-between; opacity: ${isAct ? '1.0' : '0.5'};">
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-family: var(--font-mono); font-size: 11px; color: var(--accent); font-weight: 700;">${p.id}</span>
+              <span style="font-size: 13px; font-weight: 700; color: var(--text-primary);">${escapeHtml(p.name)}</span>
+            </div>
+            <label style="position: relative; display: inline-block; width: 34px; height: 18px; margin: 0; cursor: pointer;">
+              <input type="checkbox" data-principle-id="${p.id}" class="principle-toggle" ${isAct ? 'checked' : ''} style="opacity: 0; width: 0; height: 0;">
+              <span style="position: absolute; cursor: pointer; inset: 0; background-color: ${isAct ? 'var(--accent)' : '#4b5563'}; border-radius: 18px; transition: .3s;"></span>
+              <span style="position: absolute; height: 12px; width: 12px; left: ${isAct ? '19px' : '3px'}; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s;"></span>
+            </label>
+          </div>
+          <div style="margin-bottom: 10px;">
+            <span class="empirical-badge" style="border-color: ${severityColor}; color: ${severityColor}; font-size: 10px; padding: 2px 6px;">
+              ${(p.severity || 'violation').toUpperCase()}
+            </span>
+            ${p.weight && p.weight !== 1.0 ? `<span class="empirical-badge badge-passed" style="font-size: 10px; margin-left: 4px;">${p.weight}x Weight</span>` : ''}
+          </div>
+          <p style="font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin: 0;">
+            ${escapeHtml(p.description)}
+          </p>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Attach toggle listeners
+  container.querySelectorAll('.principle-toggle').forEach(input => {
+    input.addEventListener('change', async (e) => {
+      const pId = e.target.dataset.principleId;
+      const checked = e.target.checked;
+      await togglePrinciple(pId, checked);
+    });
+  });
+}
+
+async function togglePrinciple(id, isActive) {
+  try {
+    const res = await fetch(`${API_BASE}/api/constitution/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: isActive }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await loadConstitutionPrinciples();
+  } catch (err) {
+    alert(`Failed to update principle ${id}: ${err.message}`);
+  }
+}
+
+async function saveNewPrinciple() {
+  const nameInput = document.getElementById('new-principle-name');
+  const severitySelect = document.getElementById('new-principle-severity');
+  const descInput = document.getElementById('new-principle-desc');
+  const modal = document.getElementById('modal-add-principle-overlay');
+
+  const name = nameInput.value.trim();
+  const desc = descInput.value.trim();
+  const severity = severitySelect.value;
+
+  if (!name || !desc) {
+    alert('Please provide both principle name and description.');
+    return;
+  }
+
+  const newId = `C_${Date.now().toString(36).toUpperCase()}`;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/constitution`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: newId,
+        name: name,
+        description: desc,
+        severity: severity,
+        is_active: true,
+        weight: 1.0,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    nameInput.value = '';
+    descInput.value = '';
+    if (modal) {
+      modal.classList.remove('open');
+      modal.style.display = 'none';
+    }
+    await loadConstitutionPrinciples();
+  } catch (err) {
+    alert(`Failed to add principle: ${err.message}`);
+  }
+}
+
+async function resetConstitutionDefaults() {
+  if (!confirm('Reset all safety principles back to standard Anthropic defaults?')) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/constitution/reset`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await loadConstitutionPrinciples();
+  } catch (err) {
+    alert(`Failed to reset: ${err.message}`);
+  }
+}
+
+function setupConstitutionListeners() {
+  const openBtn = document.getElementById('btn-open-add-principle');
+  const closeBtn = document.getElementById('close-modal-add-principle-btn');
+  const saveBtn = document.getElementById('btn-save-new-principle');
+  const resetBtn = document.getElementById('btn-reset-constitution');
+  const modal = document.getElementById('modal-add-principle-overlay');
+
+  if (openBtn && modal) {
+    openBtn.addEventListener('click', () => {
+      modal.style.display = 'flex';
+      modal.classList.add('open');
+    });
+  }
+  if (closeBtn && modal) {
+    closeBtn.addEventListener('click', () => {
+      modal.classList.remove('open');
+      modal.style.display = 'none';
+    });
+  }
+  if (saveBtn) {
+    saveBtn.addEventListener('click', saveNewPrinciple);
+  }
+  if (resetBtn) {
+    resetBtn.addEventListener('click', resetConstitutionDefaults);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// ATTACK-IN-THE-MIDDLE BATTERY SIMULATOR LOGIC
+// ═══════════════════════════════════════════════════════════
+
+async function loadBatteryStatus() {
+  const dsrLabel = document.getElementById('stat-battery-dsr');
+  const totalLabel = document.getElementById('stat-battery-total');
+  const interceptedLabel = document.getElementById('stat-battery-intercepted');
+  const breachedLabel = document.getElementById('stat-battery-breached');
+  if (!dsrLabel) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/redteam/battery/status`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const dsr = data.dsr || {};
+
+    dsrLabel.textContent = `${dsr.dsr_percent !== undefined ? dsr.dsr_percent.toFixed(1) : 100.0}%`;
+    if (totalLabel) totalLabel.textContent = dsr.total_attacks || 0;
+    if (interceptedLabel) interceptedLabel.textContent = dsr.intercepted || 0;
+    if (breachedLabel) breachedLabel.textContent = dsr.breached || 0;
+
+    if (data.history && data.history.length > 0) {
+      renderBatteryLog(data.history);
+    }
+  } catch (err) {
+    console.error('Failed to load battery status:', err);
+  }
+}
+
+async function runAttackBattery() {
+  const btn = document.getElementById('btn-run-attack-battery');
+  const badge = document.getElementById('badge-battery-status');
+  if (btn) btn.disabled = true;
+  if (badge) {
+    badge.className = 'panel-badge badge-active';
+    badge.textContent = 'Simulating Attacks...';
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/redteam/battery/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const dsr = data.dsr_summary || {};
+    const dsrLabel = document.getElementById('stat-battery-dsr');
+    const totalLabel = document.getElementById('stat-battery-total');
+    const interceptedLabel = document.getElementById('stat-battery-intercepted');
+    const breachedLabel = document.getElementById('stat-battery-breached');
+
+    if (dsrLabel) dsrLabel.textContent = `${dsr.dsr_percent !== undefined ? dsr.dsr_percent.toFixed(1) : 100.0}%`;
+    if (totalLabel) totalLabel.textContent = dsr.total_attacks || 0;
+    if (interceptedLabel) interceptedLabel.textContent = dsr.intercepted || 0;
+    if (breachedLabel) breachedLabel.textContent = dsr.breached || 0;
+
+    if (badge) {
+      badge.className = 'panel-badge badge-passed';
+      badge.textContent = `${data.batch_size} Tested`;
+    }
+
+    if (data.results) {
+      renderBatteryLog(data.results);
+    }
+  } catch (err) {
+    alert(`Battery run failed: ${err.message}`);
+    if (badge) {
+      badge.className = 'panel-badge badge-flagged';
+      badge.textContent = 'Error';
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderBatteryLog(results) {
+  const logContainer = document.getElementById('battery-results-log');
+  if (!logContainer) return;
+
+  logContainer.style.display = 'block';
+  logContainer.innerHTML = results.map(r => {
+    const statusColor = r.intercepted ? '#10b981' : '#ef4444';
+    const statusText = r.intercepted ? 'INTERCEPTED' : 'BREACH';
+    return `
+      <div style="border-bottom: 1px solid rgba(255,255,255,0.05); padding: 6px 0; display: flex; justify-content: space-between;">
+        <span><strong style="color: ${statusColor};">[${statusText}]</strong> <span style="color: var(--accent);">${escapeHtml(r.name)}</span>: ${escapeHtml(r.violation_details)}</span>
+        <span style="color: var(--text-muted);">${r.intercepting_tier.toUpperCase()}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+async function exportAuditReport() {
+  try {
+    const res = await fetch(`${API_BASE}/api/redteam/battery/export?format=markdown`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const md = await res.text();
+
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `TAO_Defensive_Compliance_Audit_${new Date().toISOString().slice(0,10)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert(`Audit report export failed: ${err.message}`);
+  }
+}
+
+function setupBatteryListeners() {
+  const runBtn = document.getElementById('btn-run-attack-battery');
+  const exportBtn = document.getElementById('btn-export-audit-report');
+
+  if (runBtn) {
+    runBtn.addEventListener('click', runAttackBattery);
+  }
+  if (exportBtn) {
+    exportBtn.addEventListener('click', exportAuditReport);
+  }
+}
+
+// Auto-initialize new listeners
+setupConstitutionListeners();
+setupBatteryListeners();

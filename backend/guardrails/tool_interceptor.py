@@ -180,6 +180,19 @@ class ToolInterceptor:
         tools = self.parse_tool_calls(raw_calls)
         results = [self.evaluate_tool_call(t) for t in tools]
         all_allowed = all(r.allowed for r in results)
+        if not all_allowed:
+            from backend.api.prometheus_exporter import prometheus_exporter
+            prometheus_exporter.record_tool_block()
+            try:
+                from backend.state.event_bus import event_bus
+                blocked_items = [r.violation_details for r in results if not r.allowed]
+                event_bus.publish_event(
+                    event_type="TOOL_CALL_BLOCKED",
+                    severity="CRITICAL",
+                    details={"blocked_count": len(blocked_items), "reasons": blocked_items},
+                )
+            except Exception:
+                pass
         return all_allowed, results
 
 

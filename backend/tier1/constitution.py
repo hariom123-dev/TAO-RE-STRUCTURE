@@ -125,7 +125,10 @@ class ConstitutionStore:
     """Manages the active set of constitutional principles."""
 
     def __init__(self, principles: list[ConstitutionalPrinciple] | None = None):
-        self._principles = {p.id: p for p in (principles or DEFAULT_CONSTITUTION)}
+        if principles is not None:
+            self._principles = {p.id: p.model_copy(deep=True) for p in principles}
+        else:
+            self.reset_defaults()
 
     @property
     def principles(self) -> list[ConstitutionalPrinciple]:
@@ -135,14 +138,33 @@ class ConstitutionStore:
         return self._principles.get(principle_id)
 
     def add(self, principle: ConstitutionalPrinciple) -> None:
-        self._principles[principle.id] = principle
+        self._principles[principle.id] = principle.model_copy(deep=True)
 
-    def remove(self, principle_id: str) -> bool:
-        return self._principles.pop(principle_id, None) is not None
+    def toggle(self, principle_id: str, is_active: bool) -> bool:
+        if principle_id in self._principles:
+            self._principles[principle_id].is_active = is_active
+            return True
+        return False
+
+    def update_weight(self, principle_id: str, weight: float) -> bool:
+        if principle_id in self._principles:
+            self._principles[principle_id].weight = max(0.1, min(weight, 5.0))
+            return True
+        return False
+
+    def reset_defaults(self) -> None:
+        self._principles = {}
+        for p in DEFAULT_CONSTITUTION:
+            clone = p.model_copy(deep=True)
+            clone.is_active = True
+            clone.weight = 1.0
+            self._principles[clone.id] = clone
 
     def format_for_prompt(self) -> str:
-        """Format principles as a numbered list for LLM prompts."""
+        """Format active principles as a numbered list for LLM prompts."""
         lines = []
-        for i, p in enumerate(self.principles, 1):
-            lines.append(f"{i}. [{p.severity.value.upper()}] {p.name}: {p.description}")
+        active_list = [p for p in self.principles if p.is_active]
+        for i, p in enumerate(active_list, 1):
+            weight_tag = f" (Weight: {p.weight}x)" if p.weight != 1.0 else ""
+            lines.append(f"{i}. [{p.severity.value.upper()}{weight_tag}] {p.name}: {p.description}")
         return "\n".join(lines)
