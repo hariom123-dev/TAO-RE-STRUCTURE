@@ -31,7 +31,7 @@ async def generate(
     user_message: str,
     system_prompt: str = "",
     model: Optional[str] = None,
-    temperature: Optional[float] = None,
+    temperature: Optional[float] = None, 
 ) -> tuple[str, int, float]:
     """
     Generate a response from the Ollama LLM.
