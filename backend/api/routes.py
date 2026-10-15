@@ -63,16 +63,33 @@ async def get_analysis_history(limit: int = 20):
     }
 
 
+from backend.caselaw.case_law_store import case_law_store
+
+
+@router.get("/api/caselaw")
+async def get_case_law():
+    """Get precedents stored in the Case Law vector database."""
+    precedents = case_law_store.get_all()
+    return {
+        "precedents": [p.model_dump() for p in precedents],
+        "total": len(precedents),
+    }
+
+
 @router.get("/api/config")
 async def get_config():
     """Get current TAO configuration (non-sensitive)."""
     return {
         "simulation_mode": settings.simulation_mode,
         "tier1_safety_threshold": settings.tier1_safety_threshold,
+        "tier1_max_backtrack_iterations": settings.tier1_max_backtrack_iterations,
         "tier2_max_debate_rounds": settings.tier2_max_debate_rounds,
         "tier2_judge_confidence_threshold": settings.tier2_judge_confidence_threshold,
         "tier3_kl_divergence_threshold": settings.tier3_kl_divergence_threshold,
         "tier3_creative_kl_threshold": settings.tier3_creative_kl_threshold,
+        "case_law_enabled": settings.case_law_enabled,
+        "ensemble_judging_enabled": settings.ensemble_judging_enabled,
+        "guardrails_enabled": settings.guardrails_enabled,
         "has_openai_key": settings.openai_api_key is not None and len(settings.openai_api_key or "") > 5,
         "has_anthropic_key": settings.anthropic_api_key is not None and len(settings.anthropic_api_key or "") > 5,
     }

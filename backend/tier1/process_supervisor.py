@@ -59,30 +59,34 @@ UNCERTAINTY_DUCKING = [
 ]
 
 
+from backend.tier1.dspy_signatures import ConstitutionalCheckSignature
+from backend.models import DSPySignatureOutput
+
+
 class ProcessSupervisor:
     """
     Constitutional Process Supervisor — scans CoT for violations.
 
     Implements:
-    1. Step-level safety scoring (Process Reward Model)
-    2. Pattern-based violation detection
-    3. Reasoning token anomaly heuristic
-    4. Correction guidance generation
+    1. Step-level safety scoring (Process Reward Model inspired by AgentPS/OmegaPRM)
+    2. DSPy Signature contract enforcement (Table 1 of TAO report)
+    3. Pattern-based and PRM violation detection with backtracking guidance
+    4. Reasoning token anomaly heuristic (triggers Tier 3)
     """
 
     def __init__(self, constitution_store: ConstitutionStore | None = None):
         self.constitution = constitution_store or ConstitutionStore()
         self.threshold = settings.tier1_safety_threshold
 
-    def evaluate(self, generation: GenerationResult, query: str) -> Tier1Result:
+    def evaluate(self, generation: GenerationResult, query: str, context: str = "") -> Tier1Result:
         """
         Run the full Tier 1 evaluation pipeline.
 
-        Returns a Tier1Result with violations found and pass/fail status.
+        Returns a Tier1Result with violations found, pass/fail status, and DSPy signature output.
         """
         violations: list[ConstitutionalViolation] = []
 
-        # 1. Score each CoT step
+        # 1. Score each CoT step (Automated Process Supervision)
         scored_steps = self._score_steps(generation.cot_steps, query)
 
         # 2. Check for specific violation patterns
@@ -96,15 +100,29 @@ class ProcessSupervisor:
             generation.reasoning_tokens, query
         )
 
-        # 4. Determine pass/fail
+        # 4. Determine pass/fail based on safety threshold
         has_critical = any(v.severity == ViolationSeverity.CRITICAL for v in violations)
         has_violation = any(v.severity == ViolationSeverity.VIOLATION for v in violations)
         has_flagged_steps = any(s.flagged for s in scored_steps)
 
-        passed = not has_critical and not (has_violation and has_flagged_steps)
+        passed = not has_critical and not (has_violation or has_flagged_steps)
 
         # Update the generation with scored steps
         generation.cot_steps = scored_steps
+
+        # 5. Build DSPy Signature Output (Table 1: context, reasoning_trace, constitution)
+        trace_str = "\n".join(f"[{s.index}] ({s.safety_score:.2f}) {s.content}" for s in scored_steps)
+        const_str = self.constitution.format_for_prompt()
+        primary_violation = violations[0] if violations else None
+
+        dspy_output = DSPySignatureOutput(
+            context=context or query,
+            reasoning_trace=trace_str or generation.raw_cot or generation.response,
+            constitution=const_str,
+            violation_detected=not passed,
+            violation_type=primary_violation.violation_type if primary_violation else ViolationType.NONE,
+            correction_guidance=primary_violation.correction_guidance if primary_violation else "All reasoning steps satisfy constitutional safety thresholds.",
+        )
 
         return Tier1Result(
             generation=generation,
@@ -112,6 +130,7 @@ class ProcessSupervisor:
             passed=passed,
             iterations=1,
             reasoning_anomaly=reasoning_anomaly,
+            dspy_signature_output=dspy_output,
         )
 
     def _score_steps(self, steps: list[CoTStep], query: str) -> list[CoTStep]:

@@ -26,7 +26,8 @@ DOMAIN_KEYWORDS: dict[str, list[str]] = {
     "financial": [
         "investment", "stock", "trading", "portfolio", "financial", "tax",
         "bank", "loan", "mortgage", "credit", "hedge fund", "cryptocurrency",
-        "bitcoin", "smart contract", "defi", "transfer", "wire",
+        "bitcoin", "smart contract", "defi", "transfer", "wire", "options",
+        "leverage", "derivative", "equity", "arbitrage", "unhedged", "returns",
     ],
     "code_deployment": [
         "deploy", "production", "kubernetes", "docker", "cicd", "pipeline",
@@ -43,7 +44,7 @@ DOMAIN_KEYWORDS: dict[str, list[str]] = {
 # High-risk action verbs that elevate any domain
 ACTION_ELEVATORS = [
     "deploy", "execute", "transfer", "send", "delete", "remove", "approve",
-    "authorize", "prescribe", "administer", "sign", "commit",
+    "authorize", "prescribe", "administer", "sign", "commit", "trade", "invest",
 ]
 
 # Low-risk / casual patterns

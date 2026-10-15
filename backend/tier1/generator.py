@@ -87,12 +87,15 @@ async def generate_response(
     context: str = "",
     risk_level: str = "medium",
     force_simulation: bool = False,
+    reasoning_effort: str = "medium",
 ) -> GenerationResult:
     """
     Generate a response with Chain-of-Thought extraction.
 
-    In simulation mode, returns pre-crafted responses that demonstrate
-    the TAO architecture's behavior without API calls.
+    Supports:
+    - reasoning_effort parameter (low, medium, high)
+    - Claude 3.5 Sonnet <antThinking> extraction
+    - Simulation mode with realistic reward-hacking patterns
     """
     start = time.time()
 
@@ -103,10 +106,90 @@ async def generate_response(
     if settings.anthropic_api_key:
         return await _generate_anthropic(query, context)
     elif settings.openai_api_key:
-        return await _generate_openai(query, context)
+        return await _generate_openai(query, context, reasoning_effort=reasoning_effort)
     else:
         # Fallback to simulation
         return _simulate_generation(query, risk_level)
+
+
+async def backtrack_and_refine(
+    query: str,
+    previous_generation: GenerationResult,
+    failing_step_index: int,
+    correction_guidance: str,
+    constitution_text: str = "",
+) -> GenerationResult:
+    """
+    Automated Process Supervision Backtracking (AgentPS & OmegaPRM).
+    Interrupts generation when a step score drops below threshold,
+    backtracks to the failing step, and regenerates using correction_guidance.
+    """
+    if settings.simulation_mode or not (settings.openai_api_key or settings.anthropic_api_key):
+        return _simulate_backtrack(query, previous_generation, failing_step_index, correction_guidance)
+
+    # Live mode backtracking
+    prompt = (
+        f"You are refining an AI response to comply with safety principles.\n\n"
+        f"USER QUERY: {query}\n"
+        f"CONSTITUTION:\n{constitution_text}\n\n"
+        f"FAILING STEP ({failing_step_index}): {previous_generation.cot_steps[failing_step_index].content if failing_step_index < len(previous_generation.cot_steps) else 'Unknown'}\n"
+        f"SUPERVISOR CORRECTION GUIDANCE: {correction_guidance}\n\n"
+        f"Regenerate a clean, step-by-step reasoning chain that corrects this error and produces an aligned final response."
+    )
+
+    if settings.anthropic_api_key:
+        return await _generate_anthropic(prompt, context="You are an aligned assistant adhering strictly to constitutional principles.")
+    else:
+        return await _generate_openai(prompt, context="You are an aligned assistant adhering strictly to constitutional principles.")
+
+
+def _simulate_backtrack(
+    query: str,
+    previous_generation: GenerationResult,
+    failing_step_index: int,
+    correction_guidance: str,
+) -> GenerationResult:
+    """Simulate the backtracking and step regeneration process."""
+    retained_steps = []
+    for i, step in enumerate(previous_generation.cot_steps):
+        if i < failing_step_index:
+            retained_steps.append(step)
+        else:
+            break
+
+    # Add regenerated step adhering to correction guidance
+    regenerated_step = CoTStep(
+        index=failing_step_index,
+        content=f"Step {failing_step_index + 1} [Refined]: Objective verification applied — {correction_guidance}",
+        safety_score=0.98,
+        flagged=False,
+    )
+    retained_steps.append(regenerated_step)
+
+    # Add concluding aligned reasoning steps
+    concluding_step = CoTStep(
+        index=failing_step_index + 1,
+        content=f"Step {failing_step_index + 2} [Refined]: Re-evaluating claims objectively. Replaced sycophantic validation with honest, evidence-based guidance.",
+        safety_score=0.99,
+        flagged=False,
+    )
+    retained_steps.append(concluding_step)
+
+    refined_response = (
+        "Thank you for sharing your thoughts. However, evaluating this objectively without sycophancy: "
+        "modifying or doubling medication dosages without direct physician supervision carries substantial health risks. "
+        "Rather than confirming assumptions, I strongly advise consulting your prescribing healthcare provider or pharmacist "
+        "before making any adjustment."
+    )
+
+    return GenerationResult(
+        response=refined_response,
+        cot_steps=retained_steps,
+        raw_cot="\n".join(s.content for s in retained_steps),
+        reasoning_tokens=sum(len(s.content.split()) for s in retained_steps) * 2,
+        completion_tokens=len(refined_response.split()) * 2,
+        model_used="simulation-refined-v1",
+    )
 
 
 def _simulate_generation(query: str, risk_level: str = "medium") -> GenerationResult:
@@ -138,8 +221,8 @@ def _simulate_generation(query: str, risk_level: str = "medium") -> GenerationRe
     )
 
 
-async def _generate_openai(query: str, context: str) -> GenerationResult:
-    """Generate via OpenAI API with logprobs extraction."""
+async def _generate_openai(query: str, context: str, reasoning_effort: str = "medium") -> GenerationResult:
+    """Generate via OpenAI API with logprobs extraction and reasoning effort tuning."""
     try:
         from openai import AsyncOpenAI
 
@@ -149,13 +232,20 @@ async def _generate_openai(query: str, context: str) -> GenerationResult:
             messages.append({"role": "system", "content": context})
         messages.append({"role": "user", "content": query})
 
-        response = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            temperature=0.7,
-            logprobs=True,
-            top_logprobs=5,
-        )
+        kwargs = {
+            "model": "gpt-4o",
+            "messages": messages,
+            "temperature": 0.7,
+            "logprobs": True,
+            "top_logprobs": 5,
+        }
+
+        # If an o1 or reasoning model is selected, set reasoning_effort dynamically
+        if "o1" in kwargs["model"] or "o3" in kwargs["model"]:
+            kwargs.pop("temperature", None)
+            kwargs["reasoning_effort"] = reasoning_effort
+
+        response = await client.chat.completions.create(**kwargs)
 
         choice = response.choices[0]
         content = choice.message.content or ""

@@ -354,6 +354,7 @@ function renderRouting(routing) {
     <span class="routing-details">
       Risk: <span class="routing-score">${riskPercent}%</span> · 
       Domain: <strong>${routing.domain || 'general'}</strong> · 
+      Reasoning Effort: <strong style="text-transform: capitalize; color: var(--color-primary);">${routing.reasoning_effort || (routing.tier >= 2 ? 'high' : routing.tier === 1 ? 'medium' : 'low')}</strong> · 
       ${routing.reasoning || ''}
     </span>
   `;
@@ -366,11 +367,37 @@ function renderResponse(result) {
   if (oldRes) oldRes.remove();
   const oldData = responseBody.querySelector('.no-data');
   if (oldData) oldData.remove();
+  const oldG = responseBody.querySelector('.guardrails-card');
+  if (oldG) oldG.remove();
 
   const el = document.createElement('div');
   el.className = 'response-content animate-in';
   el.textContent = result.final_response || '(No response generated)';
   responseBody.appendChild(el);
+
+  // Render Guardrails AI output validation card (Section 6.1)
+  if (result.guardrails_result) {
+    const g = result.guardrails_result;
+    const gCard = document.createElement('div');
+    gCard.className = 'guardrails-card animate-slide';
+    gCard.style = 'margin-top: 14px; padding: 12px 14px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; font-size: 12px;';
+    gCard.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <span style="font-weight: 600; color: #10b981; display: flex; align-items: center; gap: 6px;">
+          🛡️ Guardrails AI Syntax & Security Check: ${g.passed ? 'PASSED' : 'FLAGGED'}
+        </span>
+        <span style="font-size: 11px; color: var(--text-secondary);">
+          ${result.metrics?.guardrails_latency_ms ? result.metrics.guardrails_latency_ms + ' ms' : 'Active'}
+        </span>
+      </div>
+      <div style="color: var(--text-secondary); line-height: 1.5;">
+        Syntax Valid: <strong>${g.syntax_valid ? '✓' : '✗'}</strong> · 
+        PII Detected: <strong>${g.pii_detected ? '⚠️ Redacted' : 'None'}</strong> · 
+        System Prompt Leak: <strong>${g.prompt_leak_detected ? '⚠️ Alert' : 'Clean'}</strong>
+      </div>
+    `;
+    responseBody.appendChild(gCard);
+  }
 }
 
 function renderTier1(tier1) {
@@ -383,6 +410,46 @@ function renderTier1(tier1) {
   setBadge(badgeTier1, passed ? 'passed' : 'flagged', passed ? 'Passed' : 'Flagged');
 
   let html = '';
+
+  // Render Backtracking and Self-Refine loop card if occurred (Section 3.2)
+  if (tier1.backtrack_history?.length) {
+    html += `
+      <div class="violation-card animate-slide" style="border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.06); margin-bottom: 14px;">
+        <div class="violation-header">
+          <span class="violation-type" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa;">
+            🔄 BACKTRACKING & SELF-REFINE (AgentPS/OmegaPRM)
+          </span>
+          <span style="font-size: 11px; color: #93c5fd;">
+            ${tier1.iterations} Iterations
+          </span>
+        </div>
+        <div class="violation-explanation" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
+          Step safety score dropped below threshold (τ &lt; 0.95). Pipeline interrupted generation,
+          backtracked to step ${tier1.backtrack_history[0].failing_step_index + 1}, and regenerated with supervisor guidance.
+        </div>
+      </div>
+    `;
+  }
+
+  // Render DSPy Signature Compartment Inspection (Section 3.1 & Table 1)
+  if (tier1.dspy_signature_output) {
+    const sig = tier1.dspy_signature_output;
+    html += `
+      <div class="violation-card animate-slide" style="margin-bottom: 14px; border-color: rgba(168, 85, 247, 0.25); background: rgba(168, 85, 247, 0.04);">
+        <div class="violation-header">
+          <span class="violation-type" style="background: rgba(168, 85, 247, 0.15); color: #c084fc;">
+            DSPy SIGNATURE CONTRACT (Table 1)
+          </span>
+          <span style="font-size: 11px; color: ${sig.violation_detected ? 'var(--color-danger)' : 'var(--color-success)'};">
+            ${sig.violation_detected ? 'Violation: ' + sig.violation_type : 'Violation: None'}
+          </span>
+        </div>
+        <div style="font-size: 11px; margin-top: 6px; color: var(--text-secondary); line-height: 1.5;">
+          <strong>Correction Guidance:</strong> ${escapeHtml(sig.correction_guidance)}
+        </div>
+      </div>
+    `;
+  }
 
   if (tier1.generation?.cot_steps?.length) {
     html += '<div class="cot-steps animate-in">';
@@ -421,15 +488,16 @@ function renderTier1(tier1) {
 
   if (tier1.reasoning_anomaly) {
     html += `
-      <div class="violation-card animate-slide" style="margin-top: 12px; border-color: rgba(245, 158, 11, 0.2);">
+      <div class="violation-card animate-slide" style="margin-top: 12px; border-color: rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.08);">
         <div class="violation-header">
-          <span class="violation-type" style="background: rgba(245, 158, 11, 0.1); color: var(--color-warning);">
-            REASONING ANOMALY
+          <span class="violation-type" style="background: rgba(245, 158, 11, 0.15); color: var(--color-warning);">
+            ⚠️ REASONING TOKEN ANOMALY (Section 3.3)
           </span>
+          <span style="font-size: 11px; color: var(--color-warning);">Triggers Tier 3 Alert</span>
         </div>
-        <div class="violation-explanation">
+        <div class="violation-explanation" style="font-size: 12px; margin-top: 6px;">
           Disproportionate reasoning effort detected for query complexity.
-          The model may be "thinking too hard" — a potential indicator of hidden reasoning.
+          Model displayed anomalous hidden token spike. Automatic escalation to Tier 3 Steganography Sentinel triggered.
         </div>
       </div>
     `;
@@ -444,12 +512,69 @@ function renderTier2(tier2) {
     return;
   }
 
+  // Check if Case Law Precedent was retrieved (Section 6.1)
+  if (tier2.case_law_match) {
+    const prec = tier2.case_law_match;
+    setBadge(badgeTier2, 'passed', 'Case Law Hit');
+    tier2Body.innerHTML = `
+      <div class="animate-in" style="padding: 16px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <span style="font-weight: 700; color: #10b981; font-size: 14px;">
+            📜 Case Law Precedent Retrieved (${prec.id})
+          </span>
+          <span style="background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
+            ${(prec.similarity_score * 100).toFixed(0)}% Semantic Match
+          </span>
+        </div>
+        <div style="font-size: 13px; color: var(--text-primary); margin-bottom: 10px; line-height: 1.5;">
+          ${escapeHtml(prec.summary_ruling)}
+        </div>
+        <div style="display: flex; gap: 14px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px;">
+          <span>⚡ Bypassed 6.87x Multiplier</span>
+          <span>💾 Saved ~${prec.tokens_saved} Tokens</span>
+          <span>⏱️ Saved ~${(prec.latency_saved_ms / 1000).toFixed(1)}s Latency</span>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   setBadge(badgeTier2,
     tier2.verdict === 'prover_wins' ? 'passed' : 'flagged',
     tier2.verdict.replace(/_/g, ' ')
   );
 
-  let html = '<div class="debate-rounds animate-in">';
+  let html = '';
+
+  // Cool-down intervention banner (Section 7.1)
+  if (tier2.cooldown_triggered) {
+    html += `
+      <div class="animate-slide" style="margin-bottom: 12px; padding: 10px 14px; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; font-size: 12px; color: #93c5fd;">
+        🧊 <strong>Cool-Down Grounding Protocol Activated (Section 7.1)</strong>: Argument polarization/hostility detected. Moderator injected agreement-grounding constraints.
+      </div>
+    `;
+  }
+
+  // Ensemble Judging Panel (Section 7.2)
+  if (tier2.ensemble_votes?.length) {
+    html += '<div class="animate-in" style="margin-bottom: 14px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">';
+    html += '<div style="font-size: 12px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary);">👥 3-Judge Ensemble Panel (Majority Vote):</div>';
+    html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;">';
+    for (const vote of tier2.ensemble_votes) {
+      html += `
+        <div style="background: rgba(0,0,0,0.25); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); font-size: 11px;">
+          <div style="font-weight: 600; color: var(--color-primary);">${vote.model_name}</div>
+          <div style="margin: 4px 0; color: ${vote.verdict === 'prover_wins' ? '#10b981' : '#f59e0b'};">
+            Verdict: ${vote.verdict.replace(/_/g, ' ').toUpperCase()} (${(vote.confidence * 100).toFixed(0)}%)
+          </div>
+          <div style="color: var(--text-secondary); font-size: 10px; line-height: 1.3;">${escapeHtml(vote.rationale || '')}</div>
+        </div>
+      `;
+    }
+    html += '</div></div>';
+  }
+
+  html += '<div class="debate-rounds animate-in">';
 
   for (const round of tier2.rounds) {
     const confPercent = Math.round((round.judge_confidence || 0) * 100);
@@ -468,15 +593,15 @@ function renderTier2(tier2) {
         </div>
         <div class="debate-arguments">
           <div class="debate-argument">
-            <div class="argument-role role-prover"><span class="role-dot"></span> Prover</div>
+            <div class="argument-role role-prover"><span class="role-dot"></span> Prover (Claude 3.5 Sonnet)</div>
             <div class="argument-content">${escapeHtml(round.prover_argument?.content || '')}</div>
           </div>
           <div class="debate-argument">
-            <div class="argument-role role-skeptic"><span class="role-dot"></span> Skeptic</div>
+            <div class="argument-role role-skeptic"><span class="role-dot"></span> Skeptic (GPT-4o)</div>
             <div class="argument-content">${escapeHtml(round.skeptic_critique?.content || '')}</div>
           </div>
           <div class="debate-argument">
-            <div class="argument-role role-judge"><span class="role-dot"></span> Judge</div>
+            <div class="argument-role role-judge"><span class="role-dot"></span> Judge / Jury Evaluation</div>
             <div class="argument-content">${escapeHtml(round.judge_evaluation?.content || '')}</div>
           </div>
         </div>
@@ -488,7 +613,7 @@ function renderTier2(tier2) {
 
   const verdictClass = `verdict-${tier2.verdict.replace('_', '')}`;
   const swapClass = tier2.swap_test_passed ? 'swap-passed' : 'swap-failed';
-  const swapText = tier2.swap_test_passed ? '✓ Swap Test Passed' : '✗ Positional Bias Detected';
+  const swapText = tier2.swap_test_passed ? '✓ Swap Test Passed (Position Invariant)' : '✗ Positional Bias Detected';
 
   html += `
     <div class="debate-verdict animate-in" style="margin-top: 12px; padding: 14px; background: var(--bg-secondary); border-radius: var(--radius-sm);">
@@ -596,11 +721,21 @@ function renderMetrics(metrics, routing) {
     </div>
   `;
 
+  if (metrics.tokens_saved_by_cache > 0) {
+    html += `
+      <div class="animate-slide" style="margin-top: 14px; padding: 10px 14px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; font-size: 12px; color: #6ee7b7; display: flex; align-items: center; gap: 8px;">
+        <span>⚡</span>
+        <span><strong>Case Law Precedent Savings:</strong> ${formatNumber(metrics.tokens_saved_by_cache)} tokens saved via vector precedent cache (avoided 6.87x debate cost multiplier).</span>
+      </div>
+    `;
+  }
+
   const maxLatency = Math.max(
     metrics.routing_latency_ms || 0,
     metrics.tier1_latency_ms || 0,
     metrics.tier2_latency_ms || 0,
     metrics.tier3_latency_ms || 0,
+    metrics.guardrails_latency_ms || 0,
     1
   );
 
@@ -611,6 +746,7 @@ function renderMetrics(metrics, routing) {
       ${waterfallRow('Tier 1', metrics.tier1_latency_ms, maxLatency, 'tier1')}
       ${waterfallRow('Tier 2', metrics.tier2_latency_ms, maxLatency, 'tier2')}
       ${waterfallRow('Tier 3', metrics.tier3_latency_ms, maxLatency, 'tier3')}
+      ${waterfallRow('Guardrails', metrics.guardrails_latency_ms, maxLatency, 'tier1')}
     </div>
   `;
 
